@@ -1,0 +1,23 @@
+paths:
+  train_feature: to_sais_new/to_sais_new/train/mengxi_boundary_anon_filtered.csv
+  train_label: to_sais_new/to_sais_new/train/mengxi_node_price_selected.csv
+  test_feature: to_sais_new/to_sais_new/test/test_in_feature_ori.csv
+  model_output: outputs/lgb_model.txt
+  metadata_output: outputs/lgb_model_metadata.json
+  predictions_output: outputs/test_predictions.csv
+  submission_output: output.csv
+
+training:
+  val_ratio: 0.2
+  val_start_date: 2025-01-01
+  val_end_date: 2025-02-28
+  seeds: 42,2024,2026
+  charge_start_min: 51
+  charge_start_max: 55
+  discharge_start_min: 66
+  discharge_start_max: 88
+  num_boost_round: 2000
+  early_stopping_rounds: 100
+
+strategy:
+  threshold_grid: 0,2000,5000,10000,20000,30000,50000,80000,100000,150000,200000

@@ -501,3 +501,172 @@ $$
 最终核心策略是：
 
 > 用 LightGBM 把电价曲线预测到“高低价排序尽量正确”，再用组合优化精确选择连续 2 小时低价充电窗口和连续 2 小时高价放电窗口，最后用验证集调交易阈值，避免预测不确定时亏损。
+
+---
+
+## 16. 针对官方数据后的方案优化
+
+在读取官方数据 `to_sais_new/to_sais_new` 后，需要对原计划做三处调整。
+
+第一，训练标签存在少量缺失点，并不是每天都完整 96 行。训练模型时可以保留所有已对齐样本，但做收益回测时必须只统计完整 96 点的日子，否则储能枚举器无法满足完整日内约束。当前实现中，`validate_profit.py` 会自动跳过不完整验证日，并在阈值搜索结果中记录 `skipped_incomplete_days`。
+
+第二，测试集日期为 `2026-01-01` 到 `2026-02-28`，共 59 天。若只用训练集末尾 20% 作为验证集，验证月份主要落在 10-12 月，和测试集季节不一致。更合理的做法是把 `2025-01-01` 到 `2025-02-28` 作为同季节验证集，用它选择交易阈值和早停轮数；最终模型再用 2025 全年训练，并预测 2026 年 1-2 月测试集。
+
+第三，单个 LightGBM 模型对 bagging 和 feature sampling 有随机波动。当前实现加入多 seed 集成，默认使用 `42,2024,2026` 三个 seed。验证阶段对三个模型的预测取均值后搜索阈值；最终阶段用全量训练集分别训练三个模型，测试集预测也取均值。这比单模型更稳，尤其适合本题这种依赖高低价窗口排序的决策任务。
+
+因此，当前实际执行路线更新为：
+
+1. 读取官方训练边界条件和节点电价，按 `times` 内连接；
+2. 构造时间周期、供需平衡、变化率、历史价格统计特征；
+3. 使用 `2025-01-01` 至 `2025-02-28` 做同季节验证，跳过不完整日做收益回测；
+4. 训练多 seed LightGBM 集成，验证预测取均值；
+5. 在验证集上按平均真实收益搜索交易阈值；
+6. 用 2025 全量训练集重训多 seed 集成；
+7. 对 `2026-01-01` 至 `2026-02-28` 测试集预测价格；
+8. 基于预测价格和验证阈值枚举生成最终 `output.csv`。
+
+对应命令为：
+
+```powershell
+python -m src.train_lgb `
+  --train-feature to_sais_new/to_sais_new/train/mengxi_boundary_anon_filtered.csv `
+  --train-label to_sais_new/to_sais_new/train/mengxi_node_price_selected.csv `
+  --val-start-date 2025-01-01 `
+  --val-end-date 2025-02-28 `
+  --seeds 42,2024,2026
+
+python -m src.predict `
+  --test-feature to_sais_new/to_sais_new/test/test_in_feature_ori.csv `
+  --metadata outputs/lgb_model_metadata.json `
+  --output outputs/test_predictions.csv
+
+python -m src.make_submission `
+  --price-csv outputs/test_predictions.csv `
+  --metadata outputs/lgb_model_metadata.json `
+  --output output.csv
+```
+
+这版仍然不使用外部数据，且暂不直接接入 `.nc` 气象网格。原因是测试集已经给出了风电、光伏、风光总加等由气象驱动的预测值，第一版先把边界条件预测值和储能收益优化做扎实。后续冲分时再考虑将 `.nc` 提取为空间统计特征，并通过验证收益确认是否真的带来增益。
+
+---
+
+## 17. 线上低分后的二次优化
+
+第一版提交线上约为 4796 分，明显低于 2025 年 1-2 月验证回测收益。这说明问题不只是模型精度，而是 **策略对模型噪声过于敏感**。
+
+复盘测试集策略后发现，原模型有些天会选择非常反常的窗口，例如凌晨充电、早上放电，或者很晚才放电。这些窗口在模型预测曲线上可能有价差，但从历史真实价格规律看，1-2 月更稳定的模式是：
+
+- 午间光伏高、净负荷低，适合充电；
+- 傍晚负荷高、光伏下降，适合放电。
+
+因此二次优化增加两层稳健约束。
+
+### 17.1 受限窗口优化
+
+不再允许优化器在全天任意位置找窗口，而是限制为：
+
+```text
+charge_start: 51 - 55
+discharge_start: 66 - 88
+```
+
+这相当于告诉优化器：可以根据模型选择具体哪天、具体哪个晚间窗口，但不要跑到明显不符合电力系统日内规律的时间段。
+
+在 2025 年 1-2 月验证集上，受限窗口的平均收益略高于无约束版本，同时保持 0 个亏损日。
+
+### 17.2 季节先验 + 模型预测混合
+
+考虑到测试集是 2026 年 1-2 月，而训练集有完整的 2025 年 1-2 月历史价格，可以直接构造同月份的历史平均价格曲线：
+
+$$
+P^{season}_{m,t}=mean(P_{2025,m,t})
+$$
+
+再与 LightGBM 预测价格混合：
+
+$$
+P^{strategy}_{d,t}=\alpha \hat P^{model}_{d,t}+(1-\alpha)P^{season}_{m,t}
+$$
+
+当前主提交使用：
+
+```text
+alpha = 0.25
+```
+
+含义是：策略窗口 75% 参考去年同月份的稳定日内规律，25% 参考模型对测试日边界条件的判断。
+
+这样做的原因是，第一版线上反馈表明模型日级窗口选择泛化不够稳；完全放弃模型又可能错过部分异常日。因此 `alpha=0.25` 是一个偏稳健的折中。
+
+当前生成了三类候选文件：
+
+```text
+outputs/output_unconstrained_score4796.csv   # 第一版，线上约 4796
+outputs/output_constrained_51_55.csv         # 受限窗口模型策略
+outputs/output_seasonal_monthly.csv          # 完全月度固定窗口策略
+outputs/output_blend_alpha025.csv            # 当前主策略，已复制为 output.csv
+outputs/output_blend_alpha050.csv            # 更依赖模型的混合策略
+outputs/output_blend_alpha075.csv            # 接近受限模型的混合策略
+```
+
+如果线上允许多次提交，建议优先提交当前 `output.csv`。若反馈仍偏低，再按保守到激进顺序尝试：
+
+1. `outputs/output_seasonal_monthly.csv`
+2. `outputs/output_blend_alpha050.csv`
+3. `outputs/output_constrained_51_55.csv`
+
+---
+
+## 18. 按 Baseline 提分方向的三次实验更新
+
+根据 `sklearn_baseline.py` 对应的提分建议，进一步完成了以下实验。
+
+### 18.1 特征重要性
+
+训练脚本已输出：
+
+```text
+outputs/feature_importance.csv
+```
+
+当前重要特征主要是供需关系类特征，例如 `supply_margin`、`load_minus_windsolar_total`、`wind_ratio`、`net_load`，说明模型学习方向符合电力市场逻辑。
+
+### 18.2 历史电价滞后特征
+
+新增递推滞后模型：
+
+```text
+src/train_lgb_lag.py
+```
+
+它使用 `price_lag_96`、`price_lag_192`、`price_lag_672` 和滚动统计。测试集没有真实电价，因此预测时按时间顺序递推，用上一天预测值作为下一天滞后。
+
+实验结果显示滞后模型 RMSE 明显降低，但收益验证较低，因此暂不作为主提交。
+
+### 18.3 NWP 气象特征
+
+新增：
+
+```text
+src/nwp_features.py
+```
+
+使用 `h5py` 从 `.nc` 中提取 `ghi/sp/t2m/tcc/tp/u100/v100` 的空间统计特征，并对 `u100/v100` 合成风速。
+
+NWP 模型 RMSE 略好，但本地收益略低。结合线上反馈，当前主提交改为：
+
+```text
+NWP 预测价格 + 自由窗口枚举 + 阈值 2000
+```
+
+当前主文件为：
+
+```text
+output.csv
+```
+
+对应候选文件：
+
+```text
+outputs/output_nwp_unconstrained_t2000.csv
+```

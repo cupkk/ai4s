@@ -1,0 +1,14 @@
+__pycache__/
+*.py[cod]
+
+outputs/*
+!outputs/.gitkeep
+
+data/train/*
+data/test/*
+data/all_nc/*
+!data/README.md
+
+to_sais_new/
+
+output.csv
