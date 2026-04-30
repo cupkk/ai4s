@@ -44,6 +44,34 @@ python -m src.predict `
 
 python -m src.make_submission `
   --price-csv outputs/test_predictions_nwp.csv `
-  --threshold 2000 `
+  --metadata outputs/lgb_model_nwp_metadata.json `
+  --threshold 0 `
+  --charge-start-min 0 `
+  --charge-start-max 55 `
+  --discharge-start-min 72 `
+  --discharge-start-max 88 `
   --output $Output `
-  --meta-output outputs/nwp_unconstrained_t2000_meta.csv
+  --meta-output outputs/nwp_c0_55_d72_88_meta.csv
+
+python -m src.make_submission `
+  --price-csv outputs/test_predictions_nwp.csv `
+  --metadata outputs/lgb_model_nwp_metadata.json `
+  --threshold 0 `
+  --output outputs/output_nwp_unconstrained.csv `
+  --meta-output outputs/nwp_unconstrained_meta.csv
+
+python -m src.make_submission `
+  --price-csv outputs/test_predictions_nwp.csv `
+  --metadata outputs/lgb_model_nwp_metadata.json `
+  --threshold 0 `
+  --charge-start-min 0 `
+  --charge-start-max 55 `
+  --discharge-start-min 72 `
+  --discharge-start-max 88 `
+  --output outputs/output_nwp_c0_55_d72_88.csv `
+  --meta-output outputs/nwp_c0_55_d72_88_meta.csv
+
+python -m src.check_submission --submission $Output
+python -m src.check_submission --submission outputs/output_nwp_unconstrained.csv
+python -m src.check_submission --submission outputs/output_nwp_c0_55_d72_88.csv
+python -m src.compare_strategies --output outputs/strategy_compare.csv

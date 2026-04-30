@@ -11,7 +11,7 @@ from .features import TIME_COL
 
 
 DEFAULT_NWP_VARIABLES = ["u100", "v100", "ghi", "t2m", "tcc", "tp", "sp"]
-DEFAULT_NWP_STATS = ["mean", "std", "min", "max"]
+DEFAULT_NWP_STATS = ["mean", "std", "min", "max", "p10", "p50", "p90"]
 
 
 def _decode_channels(raw_channels: Iterable[object]) -> List[str]:
@@ -63,6 +63,14 @@ def extract_one_nc(
                     row[f"nwp_{var}_min"] = float(np.min(finite))
                 if "max" in stats:
                     row[f"nwp_{var}_max"] = float(np.max(finite))
+                if "p10" in stats:
+                    row[f"nwp_{var}_p10"] = float(np.percentile(finite, 10))
+                if "p50" in stats:
+                    row[f"nwp_{var}_p50"] = float(np.percentile(finite, 50))
+                if "p90" in stats:
+                    row[f"nwp_{var}_p90"] = float(np.percentile(finite, 90))
+                if var == "ghi":
+                    row["nwp_ghi_positive_ratio"] = float(np.mean(finite > 0))
             if "u100" in channels and "v100" in channels:
                 u = data[hour, channels.index("u100"), :, :].astype(float)
                 v = data[hour, channels.index("v100"), :, :].astype(float)
@@ -72,6 +80,10 @@ def extract_one_nc(
                     row["nwp_wind_speed_mean"] = float(np.mean(finite_wind))
                     row["nwp_wind_speed_std"] = float(np.std(finite_wind))
                     row["nwp_wind_speed_max"] = float(np.max(finite_wind))
+                    row["nwp_wind_speed_p10"] = float(np.percentile(finite_wind, 10))
+                    row["nwp_wind_speed_p50"] = float(np.percentile(finite_wind, 50))
+                    row["nwp_wind_speed_p90"] = float(np.percentile(finite_wind, 90))
+                    row["nwp_wind_speed_cube_mean"] = float(np.mean(finite_wind**3))
             rows.append(row)
 
     hourly = pd.DataFrame(rows)
@@ -90,6 +102,7 @@ def build_nwp_feature_cache(
     start_time: str = "",
     end_time: str = "",
     variables: Sequence[str] = DEFAULT_NWP_VARIABLES,
+    stats: Sequence[str] = DEFAULT_NWP_STATS,
 ) -> pd.DataFrame:
     nwp_path = Path(nwp_dir)
     if not nwp_path.exists():
@@ -106,7 +119,7 @@ def build_nwp_feature_cache(
             continue
         if end is not None and target_date > end:
             continue
-        parts.append(extract_one_nc(file, variables=variables))
+        parts.append(extract_one_nc(file, variables=variables, stats=stats))
 
     if not parts:
         raise ValueError(f"no NWP files matched requested range in {nwp_dir}")
@@ -123,6 +136,8 @@ def load_or_build_nwp_features(
     cache_path: str,
     start_time: str = "",
     end_time: str = "",
+    variables: Sequence[str] = DEFAULT_NWP_VARIABLES,
+    stats: Sequence[str] = DEFAULT_NWP_STATS,
 ) -> pd.DataFrame:
     cache = Path(cache_path)
     start = pd.Timestamp(start_time) if start_time else None
@@ -133,9 +148,25 @@ def load_or_build_nwp_features(
         if not nwp.empty:
             covers_start = start is None or nwp[TIME_COL].min() <= start
             covers_end = end is None or nwp[TIME_COL].max() >= end
-            if covers_start and covers_end:
+            required_cols = {f"nwp_{var}_{stat}" for var in variables for stat in stats}
+            required_cols.update(
+                {
+                    "nwp_wind_speed_p90",
+                    "nwp_wind_speed_cube_mean",
+                    "nwp_ghi_positive_ratio",
+                }
+            )
+            has_required_columns = required_cols.issubset(set(nwp.columns))
+            if covers_start and covers_end and has_required_columns:
                 return nwp
-    return build_nwp_feature_cache(nwp_dir, cache_path, start_time=start_time, end_time=end_time)
+    return build_nwp_feature_cache(
+        nwp_dir,
+        cache_path,
+        start_time=start_time,
+        end_time=end_time,
+        variables=variables,
+        stats=stats,
+    )
 
 
 def merge_nwp_features(df: pd.DataFrame, nwp_features: pd.DataFrame) -> pd.DataFrame:
