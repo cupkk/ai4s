@@ -670,3 +670,159 @@ output.csv
 ```text
 outputs/output_nwp_unconstrained_t2000.csv
 ```
+## 19. 2026-04-30 调研后的策略调整
+
+### 19.1 当前线上反馈
+
+已提交结果显示：
+
+- `outputs/output_nwp_unconstrained.csv`：`5117.832037755039`
+- NWP + `threshold=2000` 的普通 `output.csv`：`4903.504068225546`
+
+结论：NWP 特征是有效的，但高阈值策略过度保守。当前根目录 `output.csv` 已恢复为 `outputs/output_nwp_unconstrained.csv`，作为稳妥主提交。
+
+### 19.2 从文献吸收的改进方向
+
+调研资料已整理到 `docs/research/`。核心启发如下：
+
+1. 电价预测需要强 baseline 和可复现验证，不能只凭一次提交判断。
+2. 储能套利是下游决策问题，不能只优化 RMSE。
+3. 价格不确定时要做稳健策略，但阈值不能太高。
+4. 深度学习模型适合长线探索，初赛阶段先优先做特征工程、NWP、收益导向融合。
+
+### 19.3 已新增代码
+
+新增：
+
+```text
+src/tune_prediction_blend.py
+```
+
+用途：
+
+- 读取普通模型和 NWP 模型的验证集预测。
+- 按权重融合预测。
+- 用储能收益回测选择权重和阈值。
+- 生成测试集融合提交文件。
+
+本地最优候选：
+
+```text
+outputs/output_blend_fine_w025_t1000.csv
+```
+
+含义：
+
+```text
+75% 非 NWP LightGBM + 25% NWP LightGBM + threshold=1000
+```
+
+本地验证收益：
+
+```text
+avg_profit=13960.943080
+loss_days=0
+```
+
+### 19.4 下一次提交建议
+
+如果只有 1 次提交机会，提交根目录 `output.csv`。
+
+如果还有额外提交机会，优先提交：
+
+```text
+outputs/output_blend_fine_w025_t1000.csv
+```
+
+如果这个候选线上低于 `5117.832037755039`，后续继续以 NWP 无阈值为主线，不再尝试高阈值版本。
+
+### 19.5 2026-04-30 01:33 线上复盘
+
+`outputs/output_blend_fine_w025_t1000.csv` 已提交，线上分数为：
+
+```text
+4703.505815153465
+```
+
+该结果低于当前最佳 `5117.832037755039`，说明收益导向融合在单一验证集上过拟合。后续执行调整：
+
+1. 取消融合 `w025` 系列推荐。
+2. 保持 `output.csv == outputs/output_nwp_unconstrained.csv`。
+3. 不再把高阈值或大幅改窗口的方案作为优先候选。
+4. 新候选必须以 NWP 无阈值版本为锚点，尽量少改每日充放电窗口。
+
+## 20. 2026-04-30 重新按评分规则优化
+
+### 20.1 评分规则复核
+
+最终分数为：
+
+```text
+Score = 所有测试日 Profit 的平均值
+Profit = sum(真实电价 * power)
+```
+
+因此提交文件中真正影响分数的是 `power` 列。`实时价格` 列用于格式和解释，但最终收益由隐藏真实电价与提交功率决定。
+
+### 20.2 尝试一：直接窗口收益模型
+
+做法：
+
+- 枚举每天所有合法 `(charge_start, discharge_start)`；
+- 用边界条件、NWP、时间特征构造候选窗口特征；
+- 直接预测该窗口真实收益；
+- 每天选择预测收益最高的窗口。
+
+验证结果：
+
+```text
+direct window model avg_profit = 11617.062476
+NWP baseline avg_profit        = 13340.960251
+```
+
+结论：直接窗口模型当前不如 NWP 主线，不提交。
+
+### 20.3 尝试二：NWP 主线窗口约束搜索
+
+保持线上已验证有效的 NWP 价格预测，只改变策略枚举范围。
+
+验证最优约束：
+
+```text
+charge_start_min=0
+charge_start_max=55
+discharge_start_min=72
+discharge_start_max=88
+threshold=0
+```
+
+本地收益：
+
+```text
+avg_profit=13662.442830
+loss_days=0
+```
+
+对比 NWP 无约束：
+
+```text
+avg_profit=13340.960251
+```
+
+生成文件：
+
+```text
+outputs/output_nwp_c0_55_d72_88.csv
+```
+
+当前根目录 `output.csv` 已覆盖为该冲分候选。原 5117 分稳妥版本仍保留：
+
+```text
+outputs/output_nwp_unconstrained.csv
+```
+
+如果本次提交低于 5117，应立刻恢复：
+
+```powershell
+Copy-Item outputs\output_nwp_unconstrained.csv output.csv -Force
+```

@@ -80,9 +80,16 @@ def infer_price_column(df: pd.DataFrame, preferred: Optional[str] = None) -> str
         if preferred not in df.columns:
             raise ValueError(f"price column not found: {preferred}")
         return preferred
-    for col in ["实时价格", "pred_price", "prediction", "A"]:
+    for col in ["实时价格", "瀹炴椂浠锋牸", "pred_price", "prediction", "A"]:
         if col in df.columns:
             return col
+    numeric_cols = [
+        col
+        for col in df.columns
+        if col != "times" and pd.api.types.is_numeric_dtype(df[col])
+    ]
+    if len(numeric_cols) == 1:
+        return numeric_cols[0]
     raise ValueError("cannot infer price column, expected one of: 实时价格, pred_price, prediction, A")
 
 
