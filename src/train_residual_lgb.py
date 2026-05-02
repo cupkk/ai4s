@@ -10,6 +10,7 @@ import pandas as pd
 
 from .features import TARGET_COL, TIME_COL, align_feature_frame, build_features, fit_history_stats
 from .nwp_features import load_or_build_nwp_features, merge_nwp_features
+from .price_history_features import add_price_history_features, fit_price_history_features
 from .storage_optimizer import generate_strategy
 from .train_lgb import (
     DEFAULT_PARAMS,
@@ -104,15 +105,18 @@ def main() -> None:
         val_end_date=args.val_end_date,
         val_days=args.val_days,
     )
-    train_stats = fit_history_stats(train_df, target_col=args.target_col)
+    price_history_stats = fit_price_history_features(train_df, target_col=args.target_col)
+    train_model_df = add_price_history_features(train_df, price_history_stats)
+    val_model_df = add_price_history_features(val_df, price_history_stats)
+    train_stats = fit_history_stats(train_model_df, target_col=args.target_col)
     train_features = build_features(
-        train_df,
+        train_model_df,
         history_stats=train_stats,
         use_exact_calendar_history=args.use_exact_calendar_history,
         use_forecast_bias=args.use_forecast_bias,
     )
     val_features = build_features(
-        val_df,
+        val_model_df,
         history_stats=train_stats,
         use_exact_calendar_history=args.use_exact_calendar_history,
         use_forecast_bias=args.use_forecast_bias,
@@ -163,9 +167,11 @@ def main() -> None:
     print(f"residual_validation_mae={mae(val_y, val_pred):.6f}")
     print(threshold_summary.to_string(index=False))
 
-    full_stats = fit_history_stats(df, target_col=args.target_col)
+    full_price_history_stats = fit_price_history_features(df, target_col=args.target_col)
+    full_model_df = add_price_history_features(df, full_price_history_stats)
+    full_stats = fit_history_stats(full_model_df, target_col=args.target_col)
     full_features = build_features(
-        df,
+        full_model_df,
         history_stats=full_stats,
         use_exact_calendar_history=args.use_exact_calendar_history,
         use_forecast_bias=args.use_forecast_bias,
@@ -202,6 +208,7 @@ def main() -> None:
             "target_col": args.target_col,
             "feature_columns": full_feature_columns,
             "history_stats": full_stats,
+            "price_history_stats": full_price_history_stats,
             "model_paths": model_paths,
             "seeds": seeds,
             "best_threshold": float(best_threshold["threshold"]),
@@ -238,6 +245,7 @@ def main() -> None:
                 end_time=str(test_df[TIME_COL].max()),
             )
             test_df = merge_nwp_features(test_df, nwp)
+        test_df = add_price_history_features(test_df, full_price_history_stats)
         test_features = build_features(
             test_df,
             history_stats=full_stats,

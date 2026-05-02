@@ -24,6 +24,71 @@ def _decode_channels(raw_channels: Iterable[object]) -> List[str]:
     return channels
 
 
+def infer_channel_hour_axes(data0_shape: Sequence[int], channel_count: int) -> tuple[int, int]:
+    """Infer channel/hour axes after the leading forecast-time axis is removed."""
+    if len(data0_shape) != 4:
+        raise ValueError(f"expected 4-D data after first axis, got shape={tuple(data0_shape)}")
+    first_is_channel = data0_shape[0] == channel_count
+    second_is_channel = data0_shape[1] == channel_count
+    if first_is_channel and not second_is_channel:
+        return 0, 1
+    if second_is_channel and not first_is_channel:
+        return 1, 0
+    raise ValueError(
+        "cannot infer channel/hour axes: "
+        f"data0_shape={tuple(data0_shape)}, channel_count={channel_count}"
+    )
+
+
+def _lead_hours(file, hour_count: int) -> List[int]:
+    if "lead_time" not in file:
+        return list(range(hour_count))
+    raw = np.asarray(file["lead_time"][()]).reshape(-1)
+    if len(raw) != hour_count:
+        return list(range(hour_count))
+    return [int(value) for value in raw]
+
+
+def _slice_channel_hour(
+    data0: np.ndarray,
+    channel_axis: int,
+    hour_axis: int,
+    channel_idx: int,
+    hour_idx: int,
+) -> np.ndarray:
+    if channel_axis == 0 and hour_axis == 1:
+        return data0[channel_idx, hour_idx, :, :]
+    if channel_axis == 1 and hour_axis == 0:
+        return data0[hour_idx, channel_idx, :, :]
+    raise ValueError(f"unsupported channel/hour axes: channel={channel_axis}, hour={hour_axis}")
+
+
+def inspect_nc_layout(nc_path: Path | str) -> dict:
+    try:
+        import h5py
+    except ImportError as exc:
+        raise RuntimeError("h5py is required to inspect official .nc files; run: pip install h5py") from exc
+
+    path = Path(nc_path)
+    with h5py.File(path, "r") as file:
+        channels = _decode_channels(file["channel"][()])
+        data_shape = tuple(int(v) for v in file["data"].shape)
+        if len(data_shape) != 5:
+            raise ValueError(f"unexpected NWP data shape in {path}: {data_shape}")
+        channel_axis, hour_axis = infer_channel_hour_axes(data_shape[1:], len(channels))
+        hour_count = int(data_shape[1 + hour_axis])
+        lead_hours = _lead_hours(file, hour_count)
+        return {
+            "file": str(path),
+            "data_shape": data_shape,
+            "channels": channels,
+            "channel_axis_after_time": channel_axis,
+            "hour_axis_after_time": hour_axis,
+            "hour_count": hour_count,
+            "lead_hours": lead_hours,
+        }
+
+
 def extract_one_nc(
     nc_path: Path,
     variables: Sequence[str] = DEFAULT_NWP_VARIABLES,
@@ -41,17 +106,26 @@ def extract_one_nc(
     with h5py.File(nc_path, "r") as file:
         channels = _decode_channels(file["channel"][()])
         data = file["data"][()]
-        # Official shape: time x hour x channel x lat x lon.
         if data.ndim != 5:
             raise ValueError(f"unexpected NWP data shape in {nc_path}: {data.shape}")
         data = data[0]
+        channel_axis, hour_axis = infer_channel_hour_axes(data.shape, len(channels))
+        hour_count = data.shape[hour_axis]
+        lead_hours = _lead_hours(file, hour_count)
 
-        for hour in range(data.shape[0]):
-            row = {TIME_COL: target_date + pd.Timedelta(hours=hour)}
+        for hour_idx, lead_hour in enumerate(lead_hours):
+            row = {TIME_COL: target_date + pd.Timedelta(hours=lead_hour)}
             for var in variables:
                 if var not in channels:
                     continue
-                arr = data[hour, channels.index(var), :, :].astype(float)
+                channel_idx = channels.index(var)
+                arr = _slice_channel_hour(
+                    data,
+                    channel_axis=channel_axis,
+                    hour_axis=hour_axis,
+                    channel_idx=channel_idx,
+                    hour_idx=hour_idx,
+                ).astype(float)
                 finite = arr[np.isfinite(arr)]
                 if finite.size == 0:
                     continue
@@ -72,8 +146,20 @@ def extract_one_nc(
                 if var == "ghi":
                     row["nwp_ghi_positive_ratio"] = float(np.mean(finite > 0))
             if "u100" in channels and "v100" in channels:
-                u = data[hour, channels.index("u100"), :, :].astype(float)
-                v = data[hour, channels.index("v100"), :, :].astype(float)
+                u = _slice_channel_hour(
+                    data,
+                    channel_axis=channel_axis,
+                    hour_axis=hour_axis,
+                    channel_idx=channels.index("u100"),
+                    hour_idx=hour_idx,
+                ).astype(float)
+                v = _slice_channel_hour(
+                    data,
+                    channel_axis=channel_axis,
+                    hour_axis=hour_axis,
+                    channel_idx=channels.index("v100"),
+                    hour_idx=hour_idx,
+                ).astype(float)
                 wind = np.sqrt(u * u + v * v)
                 finite_wind = wind[np.isfinite(wind)]
                 if finite_wind.size:

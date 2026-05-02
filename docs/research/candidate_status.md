@@ -1,41 +1,67 @@
 # 提交候选状态表
 
-更新日期：2026-04-30
+更新日期：2026-05-02
 
-这份文档只回答一个问题：现在到底该提交哪个文件，哪些文件只是实验候选。
+这份文档只回答一个问题：现在应该提交哪个文件，哪些文件只是实验候选，哪些文件不能再当主线。
 
-## 当前主线与当前文件状态
+## 当前结论
 
-| 文件 | 状态 | 线上分数 | 说明 |
+| 文件 | 状态 | 已知线上分数 | 说明 |
 |---|---:|---:|---|
-| `outputs/output_nwp_unconstrained.csv` | 已验证主线 | `5117.832037755039` | 目前线上最高的已验证结果，使用 NWP LightGBM 预测 + 每天一次充放电，`threshold=0`。 |
-| `output.csv` | 当前强候选 | 待以最新提交记录为准 | 当前仓库里的 `output.csv` 与 `outputs/output_nwp_c0_55_d72_88.csv` 一致，不是 `output_nwp_unconstrained.csv` 的字节级副本。 |
-| `outputs/output_nwp_c0_55_d72_88.csv` | 强候选 | 待线上确认 | 旧验证窗口和滚动验证都优于无约束版本；滚动验证平均收益 `5783.5865`，无约束为 `5045.5199`。 |
+| `output.csv` | 当前冲分候选 | 待线上确认 | 当前与 `outputs/output_nwp_c0_55_d72_88.csv` 字节一致。它来自 NWP LightGBM 多 seed 预测，并限制充电窗口为 `0-55`、放电窗口为 `72-88`。 |
+| `outputs/output_nwp_c0_55_d72_88.csv` | 当前冲分候选 | 待线上确认 | 2025 年 1-2 月验证集中收益最高；滚动验证中也优于无约束策略。 |
+| `outputs/output_nwp_unconstrained_online5117.csv` | 保底候选 | `5117.832037755039` | 旧版线上验证过的最高分文件，已单独备份，避免被 pipeline 覆盖。 |
 
-## 不能再当主线的版本
+## 当前不建议提交
 
-| 文件 | 线上分数 | 问题 |
+| 文件 | 线上分数或本地结果 | 不建议原因 |
 |---|---:|---|
-| `outputs/output_blend_fine_w025_t1000.csv` | `4703.505815153465` | 本地验证收益高，但线上明显下降，说明季节先验混合或阈值在公开评分区过拟合。 |
-| `outputs/output_nwp_unconstrained_t2000.csv` | `4903.504068225546` | `threshold=2000` 会少交易若干天，线上收益低于无阈值主线。 |
-| `outputs/output_nwp_moderate_t2000.csv` | 未作为主线 | 同样受 `threshold=2000` 影响，除非滚动验证证明有效，否则不提交。 |
+| `outputs/output_blend_fine_w025_t1000.csv` | `4703.505815153465` | 已线上验证低于主线，说明该 blend/threshold 组合过拟合。 |
+| `outputs/output_nwp_unconstrained_t2000.csv` | `4903.504068225546` | `threshold=2000` 会减少交易天数，线上低于无阈值主线。 |
+| `outputs/output_residual_nwp.csv` | 本地验证 `avg_profit=9906.3860` | residual 单模型明显低于当前主线 `13370.6`，暂不提交。 |
+| `outputs/output_window_ranker_c055_d7288.csv` | 本地验证 `avg_profit=7712.8071` | 直接窗口收益模型早停过早，收益低于主线，暂不提交。 |
+| `outputs/output_nwp_robust_lambda0p25_t0.csv` | 本地验证 `avg_profit=13360.5001` | 不确定性惩罚略低于主线；可保留作实验，不占用提交次数。 |
 
-## 待验证候选
+## 本轮新增候选
 
-| 文件 | 本地依据 | 风险 |
-|---|---|---|
-| `outputs/output_nwp_c0_55_d72_88.csv` | 2025 年 1-2 月验证收益略高于无约束版本。 | 只在单一验证窗口上更好，可能对 2026 年测试期过拟合。 |
-| `outputs/output_nwp_c0_55.csv` | 限制充电窗口，保留放电自由度。 | 比完整窗口约束更保守，但仍需滚动验证。 |
-| `outputs/output_nwp_bias.csv` | 加入预测偏差类特征。 | 尚无线上结果，不能直接替换主线。 |
+| 文件 | 本地验证平均收益 | capture ratio | loss days | 结论 |
+|---|---:|---:|---:|---|
+| `outputs/output_nwp_window_c0_55_d72_88_t100.csv` | `13370.6122` | `0.8432` | `0` | 线下略优于 `threshold=0`，但测试集上与当前 `output.csv` 完全相同。 |
+| `outputs/output_nwp_window_c0_55_d72_88_t0.csv` | `13370.5786` | `0.8432` | `1` | 与当前 `output.csv` 相同。 |
+| `outputs/output_nwp_window_c0_55_d68_88_t0.csv` | `13340.3553` | `0.8266` | `0` | 收益略低，可作为备选但不优先提交。 |
 
-## 当前提交规则
+## 为什么当前仍提交 `output.csv`
 
-1. 若要保底，提交 `outputs/output_nwp_unconstrained.csv` 或先把它复制为 `output.csv`。
-2. 若要冲分，提交当前 `output.csv`，它等同于 `outputs/output_nwp_c0_55_d72_88.csv`。
-3. 每次生成新候选后，先运行 `python -m src.check_submission --submission <文件>`。
-4. 每个候选必须进入 `outputs/strategy_compare.csv`，至少包含本地平均收益、oracle 捕获率、regret、窗口命中率。
-5. 线上失败的文件不要覆盖 `output.csv`，只能留在 `outputs/` 里做复盘。
+当前 `output.csv` 的文件哈希与以下文件一致：
 
-## 为什么这样做
+```text
+output.csv
+outputs/output_nwp_c0_55_d72_88.csv
+outputs/output_nwp_window_c0_55_d72_88_t100.csv
+```
 
-比赛分数不是单纯看 RMSE，而是看充放电动作在真实价格上的收益。之前出现过“本地验证更高、线上更低”的情况，所以现在主线只认线上验证过的文件；新想法必须先进入统一比较表，再决定是否占用每天有限的提交次数。
+也就是说，虽然线下发现 `threshold=100` 可以少亏一天，但测试集里每天预测价差都超过 100，因此它没有改变测试期任何一天的充放电动作。
+
+提交优先级建议：
+
+1. 冲分：提交 `output.csv`。
+2. 如果冲分低于 `5117.8320`：改提交 `outputs/output_nwp_unconstrained_online5117.csv`。
+3. 不再提交 `threshold>=500`、`blend_fine_w025_t1000`、`residual_nwp`、`window_ranker` 这些已被验证排除的候选。
+
+## 提交前检查
+
+每次提交前运行：
+
+```powershell
+python -m src.check_submission --submission output.csv
+```
+
+当前检查结果：
+
+```text
+rows=5664
+days=59
+traded_days=59
+errors=0
+warnings=0
+```

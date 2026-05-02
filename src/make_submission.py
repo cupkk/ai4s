@@ -27,12 +27,29 @@ def _threshold_from_metadata(path: Optional[str]) -> Optional[float]:
     return None if value is None else float(value)
 
 
+def _parse_threshold_by_month(text: str) -> dict[int, float]:
+    result: dict[int, float] = {}
+    if not text:
+        return result
+    for item in text.split(","):
+        item = item.strip()
+        if not item:
+            continue
+        month_text, value_text = item.split(":", 1)
+        month = int(month_text)
+        if month < 1 or month > 12:
+            raise ValueError(f"invalid month in threshold map: {month}")
+        result[month] = float(value_text)
+    return result
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Generate output.csv from predicted prices.")
     parser.add_argument("--price-csv", required=True, help="CSV with times and predicted price.")
     parser.add_argument("--output", default="output.csv")
     parser.add_argument("--price-col", default="")
     parser.add_argument("--threshold", type=float, default=None)
+    parser.add_argument("--threshold-by-month", default="")
     parser.add_argument("--threshold-file", default="")
     parser.add_argument("--metadata", default="")
     parser.add_argument("--charge-start-min", type=int, default=None)
@@ -49,6 +66,7 @@ def main() -> None:
         threshold = _threshold_from_metadata(args.metadata)
     if threshold is None:
         threshold = 0.0
+    threshold_by_month = _parse_threshold_by_month(args.threshold_by_month)
 
     constraints = {}
     if args.metadata:
@@ -71,6 +89,7 @@ def main() -> None:
         price_df,
         threshold=threshold,
         price_col=args.price_col or None,
+        threshold_by_month=threshold_by_month or None,
         **constraints,
     )
     Path(args.output).parent.mkdir(parents=True, exist_ok=True)
@@ -78,7 +97,10 @@ def main() -> None:
     if args.meta_output:
         Path(args.meta_output).parent.mkdir(parents=True, exist_ok=True)
         meta.to_csv(args.meta_output, index=False)
-    print(f"saved_submission={args.output}, rows={len(out)}, threshold={threshold}")
+    print(
+        f"saved_submission={args.output}, rows={len(out)}, "
+        f"threshold={threshold}, threshold_by_month={threshold_by_month}"
+    )
 
 
 if __name__ == "__main__":

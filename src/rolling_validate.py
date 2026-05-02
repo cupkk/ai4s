@@ -9,6 +9,7 @@ import numpy as np
 import pandas as pd
 
 from .features import TARGET_COL, TIME_COL, align_feature_frame, build_features, fit_history_stats
+from .price_history_features import add_price_history_features, fit_price_history_features
 from .train_lgb import (
     DEFAULT_PARAMS,
     load_training_frame,
@@ -138,15 +139,18 @@ def run_rolling_validation(
         if train_df.empty or val_df.empty:
             raise ValueError(f"fold {fold_index} has empty train or validation data: {start}..{end}")
 
-        stats = fit_history_stats(train_df, target_col=TARGET_COL)
+        price_history_stats = fit_price_history_features(train_df, target_col=TARGET_COL)
+        train_model_df = add_price_history_features(train_df, price_history_stats)
+        val_model_df = add_price_history_features(val_df, price_history_stats)
+        stats = fit_history_stats(train_model_df, target_col=TARGET_COL)
         train_features = build_features(
-            train_df,
+            train_model_df,
             history_stats=stats,
             use_exact_calendar_history=use_exact_calendar_history,
             use_forecast_bias=use_forecast_bias,
         )
         val_features = build_features(
-            val_df,
+            val_model_df,
             history_stats=stats,
             use_exact_calendar_history=use_exact_calendar_history,
             use_forecast_bias=use_forecast_bias,

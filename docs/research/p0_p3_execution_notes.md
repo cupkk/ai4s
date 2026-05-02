@@ -24,12 +24,30 @@ outputs/output_nwp_unconstrained.csv
 
 1. 修改 `scripts/run_pipeline.ps1`，去掉默认 `threshold=2000`。
 2. 新增 `src/check_submission.py`，检查提交文件格式和充放电合法性。
-3. 增强 `src/validate_profit.py`，新增：
+3. 新增 `src/select_best_submission.py`，根据 `outputs/strategy_compare.csv` 自动选择最终 `output.csv`。
+4. 新增 `src/nwp_diagnostics.py`，检查 NWP 维度、GHI 峰值时间、夜间 GHI 和缺失率。
+5. 增强 `src/validate_profit.py`，新增：
    - `oracle_profit`：当天真实价格下理论最优收益。
    - `capture_ratio`：我们捕获了理论最优收益的比例。
    - `regret`：理论最优收益减去实际策略收益。
    - `window_hit`：充放电窗口是否命中理论最优窗口。
-4. 新增 `docs/research/candidate_status.md`，明确哪些文件可提交、哪些只是候选。
+6. 新增 `docs/research/candidate_status.md`，明确哪些文件可提交、哪些只是候选。
+
+### NWP 诊断结论
+
+本地抽样诊断输出在：
+
+```text
+outputs/nwp_diagnostics.csv
+```
+
+当前官方样本文件的实际维度为：
+
+```text
+1 x 24 x 7 x 104 x 225
+```
+
+即 `time, hour, channel, lat, lon`。脚本已改成自动识别 `hour/channel` 轴，不再写死。抽样文件 GHI 峰值均在北京时间 `13:00`，夜间 GHI 均值为 `0`，暂未发现 8 小时错位证据。
 
 ### 为什么这样做
 
@@ -94,7 +112,15 @@ python -m src.diagnose_intertie_sign `
    - `hist_month_slot_std/p10/p90`
    - `hist_dow_slot_std/p10/p90`
 
-2. 新增 residual LightGBM：
+2. 新增无泄漏历史价格特征模块 `src/price_history_features.py`：
+   - `price_hist_same_month_day_slot`
+   - `price_hist_month_slot_median/p10/p90`
+   - `price_hist_winter_slot_*`
+   - `price_hist_recent_7d/14d/28d_slot_*`
+
+这些特征由训练期标签拟合，再映射到验证/测试期，避免直接使用验证期真实滞后价格。
+
+3. 新增 residual LightGBM：
 
 ```powershell
 python -m src.train_residual_lgb `
@@ -104,7 +130,7 @@ python -m src.train_residual_lgb `
   --nwp-dir to_sais_new/to_sais_new/all_nc
 ```
 
-3. 新增 LightGBM ranker：
+4. 新增 LightGBM ranker：
 
 ```powershell
 python -m src.train_lgb_ranker `
@@ -142,13 +168,36 @@ python -m src.train_quantile_lgb `
   --nwp-dir to_sais_new/to_sais_new/all_nc
 ```
 
+3. 新增 seed 不确定性稳健策略：
+
+```powershell
+python -m src.make_robust_submission `
+  --price-csv outputs/test_predictions_nwp.csv `
+  --lambda-uncertainty 1.0 `
+  --output outputs/output_nwp_robust_l1.csv
+```
+
+`predict.py` 现在会在多 seed 模型下输出 `pred_price_seed*` 和 `pred_std`。稳健策略用 `spread_mean - lambda * spread_uncertainty` 选择窗口，避免多个 seed 分歧很大时过度激进。
+
+4. 新增窗口收益模型：
+
+```powershell
+python -m src.train_window_ranker `
+  --train-feature to_sais_new/to_sais_new/train/mengxi_boundary_anon_filtered.csv `
+  --train-label to_sais_new/to_sais_new/train/mengxi_node_price_selected.csv `
+  --test-feature to_sais_new/to_sais_new/test/test_in_feature_ori.csv `
+  --nwp-dir to_sais_new/to_sais_new/all_nc
+```
+
+它不再先预测 96 个点价格，而是直接枚举每天所有合法 `(charge_start, discharge_start)`，用真实窗口收益训练 LightGBM 回归模型。这个方向更贴近最终评分，但计算量更大，需要滚动验证后再考虑提交。
+
 ### 为什么这样做
 
 交易分类模型直接学习“这个点是不是最优充电/放电窗口”，理论上更贴近得分，但也更容易受标签构造影响。Quantile 模型能给出不确定性，后续可以做稳健策略：如果 q90-q10 很宽，说明预测不稳，策略就应该降低激进度。
 
 PatchTST、TFT、TimesNet 暂时不接入主线。原因是当前训练数据只有 2025 年一年，深度时序模型需要更多数据和更严格的滚动验证，否则很容易本地好看、线上变差。
 
-本轮对 residual、ranker、trade classifier、quantile 四个脚本都做了小轮数 smoke test，确认脚本能跑通；smoke 输出只用于检查程序，不作为正式提交结果。
+本轮对 residual、ranker、trade classifier、quantile、window ranker 脚本都做了小轮数 smoke test，确认脚本能跑通；smoke 输出只用于检查程序，不作为正式提交结果。
 
 ## 下一步提交建议
 

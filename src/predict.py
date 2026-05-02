@@ -9,6 +9,7 @@ import pandas as pd
 
 from .features import TIME_COL, align_feature_frame, build_features, ensure_datetime
 from .nwp_features import load_or_build_nwp_features, merge_nwp_features
+from .price_history_features import add_price_history_features
 
 
 def main() -> None:
@@ -29,6 +30,7 @@ def main() -> None:
     metadata = json.loads(Path(args.metadata).read_text(encoding="utf-8"))
     feature_columns = metadata["feature_columns"]
     history_stats = metadata.get("history_stats")
+    price_history_stats = metadata.get("price_history_stats")
     feature_options = metadata.get("feature_options", {})
 
     test_df = pd.read_csv(args.test_feature)
@@ -41,6 +43,7 @@ def main() -> None:
             end_time=str(test_df[TIME_COL].max()),
         )
         test_df = merge_nwp_features(test_df, nwp)
+    test_df = add_price_history_features(test_df, price_history_stats)
     feature_result = build_features(
         test_df,
         history_stats=history_stats,
@@ -50,12 +53,18 @@ def main() -> None:
     x_test = align_feature_frame(feature_result.frame, feature_columns)
 
     model_paths = metadata.get("model_paths") or [args.model]
+    seeds = metadata.get("seeds") or list(range(len(model_paths)))
     preds = []
     for model_path in model_paths:
         model = lgb.Booster(model_file=model_path)
         preds.append(model.predict(x_test))
-    pred = np.mean(np.vstack(preds), axis=0)
+    pred_matrix = np.vstack(preds)
+    pred = np.mean(pred_matrix, axis=0)
     out = pd.DataFrame({"times": test_df[TIME_COL].to_numpy(), "实时价格": pred})
+    if len(preds) > 1:
+        for seed, seed_pred in zip(seeds, preds):
+            out[f"pred_price_seed{seed}"] = seed_pred
+        out["pred_std"] = np.std(pred_matrix, axis=0)
     Path(args.output).parent.mkdir(parents=True, exist_ok=True)
     out.to_csv(args.output, index=False)
     print(f"saved_predictions={args.output}, rows={len(out)}")

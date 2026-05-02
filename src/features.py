@@ -20,7 +20,7 @@ DEFAULT_BASE_FEATURES = [
     "非市场化机组预测值",
 ]
 
-EXTRA_FEATURE_PREFIXES = ("nwp_", "price_lag_", "price_roll_")
+EXTRA_FEATURE_PREFIXES = ("nwp_", "price_lag_", "price_roll_", "price_hist_")
 
 TIME_FEATURES = [
     "hour",

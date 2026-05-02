@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import argparse
-from typing import List, Sequence, Tuple
+from typing import Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 import pandas as pd
@@ -46,6 +46,7 @@ def backtest_predictions(
     charge_start_max: int = 80,
     discharge_start_min: int = 8,
     discharge_start_max: int = 88,
+    threshold_by_month: Optional[Dict[int, float]] = None,
 ) -> Tuple[dict, pd.DataFrame]:
     df = df.copy()
     if "times" not in df.columns:
@@ -71,6 +72,7 @@ def backtest_predictions(
         charge_start_max=charge_start_max,
         discharge_start_min=discharge_start_min,
         discharge_start_max=discharge_start_max,
+        threshold_by_month=threshold_by_month,
     )
     joined = strategy.merge(df_complete[["times", true_col]], on="times", how="left")
     if joined[true_col].isna().any():

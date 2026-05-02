@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Iterable, Optional, Tuple
+from typing import Dict, Iterable, Optional, Tuple
 
 import numpy as np
 import pandas as pd
@@ -102,6 +102,7 @@ def generate_strategy(
     charge_start_max: int = 80,
     discharge_start_min: int = 8,
     discharge_start_max: int = 88,
+    threshold_by_month: Optional[Dict[int, float]] = None,
 ) -> Tuple[pd.DataFrame, pd.DataFrame]:
     if "times" not in price_df.columns:
         raise ValueError("missing required column: times")
@@ -119,9 +120,15 @@ def generate_strategy(
         if strict_96 and len(group) != 96:
             raise ValueError(f"{date} must contain 96 rows, got {len(group)}")
 
+        month = int(pd.Timestamp(group["times"].iloc[0]).month)
+        day_threshold = (
+            float(threshold_by_month[month])
+            if threshold_by_month and month in threshold_by_month
+            else float(threshold)
+        )
         result = optimize_one_day(
             group[price_col].to_numpy(),
-            threshold=threshold,
+            threshold=day_threshold,
             charge_start_min=charge_start_min,
             charge_start_max=charge_start_max,
             discharge_start_min=discharge_start_min,
@@ -139,6 +146,7 @@ def generate_strategy(
             {
                 "date": str(date),
                 "pred_best_profit": result.best_profit,
+                "threshold": day_threshold,
                 "charge_start": result.charge_start,
                 "discharge_start": result.discharge_start,
                 "traded": result.traded,

@@ -18,6 +18,7 @@ from .features import (
     fit_history_stats,
 )
 from .nwp_features import load_or_build_nwp_features, merge_nwp_features
+from .price_history_features import add_price_history_features, fit_price_history_features
 from .validate_profit import parse_threshold_grid, search_best_threshold
 
 
@@ -250,15 +251,19 @@ def main() -> None:
         f"rows={len(val_df)}, days={val_df[TIME_COL].dt.date.nunique()}"
     )
 
-    train_stats = fit_history_stats(train_df, target_col=args.target_col)
+    price_history_stats = fit_price_history_features(train_df, target_col=args.target_col)
+    train_model_df = add_price_history_features(train_df, price_history_stats)
+    val_model_df = add_price_history_features(val_df, price_history_stats)
+
+    train_stats = fit_history_stats(train_model_df, target_col=args.target_col)
     train_features = build_features(
-        train_df,
+        train_model_df,
         history_stats=train_stats,
         use_exact_calendar_history=args.use_exact_calendar_history,
         use_forecast_bias=args.use_forecast_bias,
     )
     val_features = build_features(
-        val_df,
+        val_model_df,
         history_stats=train_stats,
         use_exact_calendar_history=args.use_exact_calendar_history,
         use_forecast_bias=args.use_forecast_bias,
@@ -322,9 +327,11 @@ def main() -> None:
         f"{best_threshold['threshold']}, avg_profit={best_threshold['avg_profit']:.6f}"
     )
 
-    full_stats = fit_history_stats(df, target_col=args.target_col)
+    full_price_history_stats = fit_price_history_features(df, target_col=args.target_col)
+    full_model_df = add_price_history_features(df, full_price_history_stats)
+    full_stats = fit_history_stats(full_model_df, target_col=args.target_col)
     full_features = build_features(
-        df,
+        full_model_df,
         history_stats=full_stats,
         use_exact_calendar_history=args.use_exact_calendar_history,
         use_forecast_bias=args.use_forecast_bias,
@@ -361,6 +368,7 @@ def main() -> None:
             "feature_columns": full_feature_columns,
             "base_features": DEFAULT_BASE_FEATURES,
             "history_stats": full_stats,
+            "price_history_stats": full_price_history_stats,
             "model_paths": model_paths,
             "seeds": seeds,
             "best_threshold": float(best_threshold["threshold"]),

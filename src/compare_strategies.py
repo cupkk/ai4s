@@ -18,6 +18,7 @@ DEFAULT_CANDIDATES = [
         "charge_start_max": 80,
         "discharge_start_min": 8,
         "discharge_start_max": 88,
+        "submission_csv": "outputs/output_base_unconstrained.csv",
     },
     {
         "name": "nwp_unconstrained",
@@ -27,6 +28,7 @@ DEFAULT_CANDIDATES = [
         "charge_start_max": 80,
         "discharge_start_min": 8,
         "discharge_start_max": 88,
+        "submission_csv": "outputs/output_nwp_unconstrained.csv",
     },
     {
         "name": "nwp_c0_55",
@@ -36,6 +38,7 @@ DEFAULT_CANDIDATES = [
         "charge_start_max": 55,
         "discharge_start_min": 8,
         "discharge_start_max": 88,
+        "submission_csv": "outputs/output_nwp_c0_55.csv",
     },
     {
         "name": "nwp_c0_55_d72_88",
@@ -45,6 +48,7 @@ DEFAULT_CANDIDATES = [
         "charge_start_max": 55,
         "discharge_start_min": 72,
         "discharge_start_max": 88,
+        "submission_csv": "outputs/output_nwp_c0_55_d72_88.csv",
     },
     {
         "name": "nwp_threshold_500",
@@ -54,6 +58,7 @@ DEFAULT_CANDIDATES = [
         "charge_start_max": 80,
         "discharge_start_min": 8,
         "discharge_start_max": 88,
+        "submission_csv": "outputs/output_nwp_unconstrained_t500.csv",
     },
     {
         "name": "nwp_threshold_1000",
@@ -63,6 +68,7 @@ DEFAULT_CANDIDATES = [
         "charge_start_max": 80,
         "discharge_start_min": 8,
         "discharge_start_max": 88,
+        "submission_csv": "outputs/output_nwp_unconstrained_t1000.csv",
     },
     {
         "name": "nwp_threshold_2000",
@@ -72,6 +78,7 @@ DEFAULT_CANDIDATES = [
         "charge_start_max": 80,
         "discharge_start_min": 8,
         "discharge_start_max": 88,
+        "submission_csv": "outputs/output_nwp_unconstrained_t2000.csv",
     },
     {
         "name": "nwp_bias_unconstrained",
@@ -81,6 +88,7 @@ DEFAULT_CANDIDATES = [
         "charge_start_max": 80,
         "discharge_start_min": 8,
         "discharge_start_max": 88,
+        "submission_csv": "outputs/output_nwp_bias.csv",
     },
     {
         "name": "nwp_exact_bias_unconstrained",
@@ -90,17 +98,18 @@ DEFAULT_CANDIDATES = [
         "charge_start_max": 80,
         "discharge_start_min": 8,
         "discharge_start_max": 88,
+        "submission_csv": "outputs/output_nwp_exact_bias.csv",
     },
 ]
 
 
 def parse_candidate(text: str) -> Dict[str, object]:
     parts = [part.strip() for part in text.split(",")]
-    if len(parts) != 7:
+    if len(parts) not in {7, 8}:
         raise ValueError(
-            "--candidate format: name,pred_csv,threshold,charge_min,charge_max,discharge_min,discharge_max"
+            "--candidate format: name,pred_csv,threshold,charge_min,charge_max,discharge_min,discharge_max[,submission_csv]"
         )
-    return {
+    candidate = {
         "name": parts[0],
         "pred_csv": parts[1],
         "threshold": float(parts[2]),
@@ -109,6 +118,9 @@ def parse_candidate(text: str) -> Dict[str, object]:
         "discharge_start_min": int(parts[5]),
         "discharge_start_max": int(parts[6]),
     }
+    if len(parts) == 8:
+        candidate["submission_csv"] = parts[7]
+    return candidate
 
 
 def compare_candidates(candidates: List[Dict[str, object]], pred_col: str, true_col: str) -> pd.DataFrame:
