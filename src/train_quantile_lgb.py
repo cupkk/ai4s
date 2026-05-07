@@ -254,7 +254,7 @@ def main() -> None:
                 ),
                 axis=0,
             )
-        pred_out = pd.DataFrame({TIME_COL: test_df[TIME_COL].to_numpy(), "鐎圭偞妞傛禒閿嬬壐": test_quantiles[0.5]})
+        pred_out = pd.DataFrame({TIME_COL: test_df[TIME_COL].to_numpy(), "实时价格": test_quantiles[0.5]})
         for alpha, pred in test_quantiles.items():
             pred_out[f"pred_q{int(alpha * 100):02d}"] = pred
         if 0.1 in test_quantiles and 0.9 in test_quantiles:
@@ -262,7 +262,7 @@ def main() -> None:
         Path(args.prediction_output).parent.mkdir(parents=True, exist_ok=True)
         pred_out.to_csv(args.prediction_output, index=False)
         submission, meta = generate_strategy(
-            pred_out[[TIME_COL, "鐎圭偞妞傛禒閿嬬壐"]],
+            pred_out[[TIME_COL, "实时价格"]],
             threshold=float(best_threshold["threshold"]),
             charge_start_min=args.charge_start_min,
             charge_start_max=args.charge_start_max,

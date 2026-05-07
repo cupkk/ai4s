@@ -301,8 +301,16 @@ def attach_baseline_window_context(
             record[f"baseline_{col}"] = float(baseline_row[col])
         baseline_records.append(record)
 
-    context = pd.DataFrame(baseline_records)
-    out = candidate_df.merge(context, on="date", how="left")
+    context = pd.DataFrame(baseline_records).set_index("date")
+    out = candidate_df.copy(deep=False)
+    date_key = out["date"].astype(str)
+    for col in context.columns:
+        out[col] = date_key.map(context[col])
+    if out["baseline_charge_start"].isna().any() or out["baseline_discharge_start"].isna().any():
+        missing = sorted(set(date_key[out["baseline_charge_start"].isna()]))
+        raise ValueError(f"baseline context merge failed for dates: {missing[:10]}")
+    out["baseline_charge_start"] = out["baseline_charge_start"].astype(int)
+    out["baseline_discharge_start"] = out["baseline_discharge_start"].astype(int)
     out["delta_charge_start"] = out["charge_start"].astype(int) - out["baseline_charge_start"].astype(int)
     out["delta_discharge_start"] = (
         out["discharge_start"].astype(int) - out["baseline_discharge_start"].astype(int)
@@ -323,6 +331,53 @@ def attach_baseline_window_context(
             - out["baseline_true_window_profit"].astype(float)
         )
     return out
+
+
+def filter_windows_near_baseline_starts(
+    candidate_df: pd.DataFrame,
+    baseline_windows: pd.DataFrame,
+    max_abs_delta: int,
+) -> pd.DataFrame:
+    """Keep only windows close enough to each date's baseline starts.
+
+    This is used before attaching the wide baseline context columns. The
+    replacement-classifier path only ever considers near-baseline moves, so
+    filtering first avoids copying a very large all-window table.
+    """
+    if int(max_abs_delta) < 0:
+        return candidate_df
+    required = {"date", "charge_start", "discharge_start"}
+    missing = required.difference(candidate_df.columns)
+    if missing:
+        raise ValueError(f"candidate windows missing columns for near-baseline filter: {sorted(missing)}")
+    baseline_required = {"date", "baseline_charge_start", "baseline_discharge_start"}
+    baseline_missing = baseline_required.difference(baseline_windows.columns)
+    if baseline_missing:
+        raise ValueError(f"baseline windows missing columns for near-baseline filter: {sorted(baseline_missing)}")
+
+    baseline = baseline_windows.loc[
+        :, ["date", "baseline_charge_start", "baseline_discharge_start"]
+    ].copy()
+    baseline["date"] = baseline["date"].astype(str)
+    baseline = baseline.drop_duplicates(subset=["date"]).set_index("date")
+    date_key = candidate_df["date"].astype(str)
+    base_charge = date_key.map(baseline["baseline_charge_start"])
+    base_discharge = date_key.map(baseline["baseline_discharge_start"])
+    if base_charge.isna().any() or base_discharge.isna().any():
+        missing_dates = sorted(set(date_key[base_charge.isna() | base_discharge.isna()]))
+        raise ValueError(f"baseline windows missing dates for near-baseline filter: {missing_dates[:10]}")
+
+    near = (
+        (candidate_df["charge_start"].astype(int) - base_charge.astype(int)).abs()
+        <= int(max_abs_delta)
+    ) & (
+        (candidate_df["discharge_start"].astype(int) - base_discharge.astype(int)).abs()
+        <= int(max_abs_delta)
+    )
+    out = candidate_df.loc[near].copy()
+    if out.empty:
+        raise ValueError(f"near-baseline prefilter removed all windows: max_abs_delta={max_abs_delta}")
+    return out.reset_index(drop=True)
 
 
 def choose_daily_windows(candidate_df: pd.DataFrame, score_col: str) -> pd.DataFrame:
@@ -549,7 +604,7 @@ def windows_to_submission(
             pd.DataFrame(
                 {
                     "times": group[TIME_COL].to_numpy(),
-                    "鐎圭偞妞傛禒閿嬬壐": price,
+                    "实时价格": price,
                     "power": power,
                 }
             )

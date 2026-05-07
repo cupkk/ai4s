@@ -308,7 +308,7 @@ def main() -> None:
             ),
             axis=0,
         )
-        pred_out = pd.DataFrame({TIME_COL: test_df[TIME_COL].to_numpy(), "鐎圭偞妞傛禒閿嬬壐": test_score})
+        pred_out = pd.DataFrame({TIME_COL: test_df[TIME_COL].to_numpy(), "实时价格": test_score})
         Path(args.prediction_output).parent.mkdir(parents=True, exist_ok=True)
         pred_out.to_csv(args.prediction_output, index=False)
         submission, meta = generate_strategy(

@@ -99,7 +99,7 @@ def generate_robust_strategy(
             pd.DataFrame(
                 {
                     "times": group["times"].to_numpy(),
-                    "鐎圭偞妞傛禒閿嬬壐": prices,
+                    "实时价格": prices,
                     "power": power,
                 }
             )

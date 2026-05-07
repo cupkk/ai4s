@@ -173,6 +173,9 @@ def run_rolling_validation(
     risk_objective: str,
     risk_proba_threshold: float,
     min_risk_expected_delta: float,
+    rule_shape_spike_max: float | None,
+    rule_shape_plateau_min: float | None,
+    rule_shape_balance_min: float | None,
     use_baseline_stability_gate: bool,
     baseline_stability_max_abs_delta: int,
     charge_start_min: int,
@@ -377,7 +380,13 @@ def run_rolling_validation(
                 risk_val_x = val_stage1[risk_feature_cols].replace([np.inf, -np.inf], np.nan).fillna(0.0)
                 if risk_objective == "rule":
                     gate = fit_rule_risk_gate(train_stage1)
-                    scored = add_rule_risk_predictions_to_scored_windows(scored, gate)
+                    scored = add_rule_risk_predictions_to_scored_windows(
+                        scored,
+                        gate,
+                        post_shape_spike_max=rule_shape_spike_max,
+                        post_shape_plateau_min=rule_shape_plateau_min,
+                        post_shape_balance_min=rule_shape_balance_min,
+                    )
                     risk_feature_cols = [
                         "delta_vs_baseline_spread_net_load",
                         "delta_vs_baseline_spread_hist_slot_mean_daily_centered",
@@ -487,6 +496,9 @@ def main() -> None:
     )
     parser.add_argument("--risk-proba-threshold", type=float, default=0.60)
     parser.add_argument("--min-risk-expected-delta", type=float, default=0.0)
+    parser.add_argument("--rule-shape-spike-max", type=float, default=None)
+    parser.add_argument("--rule-shape-plateau-min", type=float, default=None)
+    parser.add_argument("--rule-shape-balance-min", type=float, default=None)
     parser.add_argument("--use-baseline-stability-gate", action="store_true")
     parser.add_argument("--baseline-stability-max-abs-delta", type=int, default=2)
     parser.add_argument("--charge-start-min", type=int, default=0)
@@ -547,6 +559,9 @@ def main() -> None:
         risk_objective=args.risk_objective,
         risk_proba_threshold=args.risk_proba_threshold,
         min_risk_expected_delta=args.min_risk_expected_delta,
+        rule_shape_spike_max=args.rule_shape_spike_max,
+        rule_shape_plateau_min=args.rule_shape_plateau_min,
+        rule_shape_balance_min=args.rule_shape_balance_min,
         use_baseline_stability_gate=args.use_baseline_stability_gate,
         baseline_stability_max_abs_delta=args.baseline_stability_max_abs_delta,
         charge_start_min=args.charge_start_min,

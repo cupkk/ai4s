@@ -38,6 +38,7 @@ from .train_window_ranker import (
     DEFAULT_POINT_FEATURES,
     attach_baseline_window_context,
     build_window_dataset,
+    filter_windows_near_baseline_starts,
     prepare_baseline_windows,
 )
 
@@ -54,6 +55,43 @@ def _window_dataset_for_frame(
     discharge_start_max: int,
     baseline_window_score_col: str,
     baseline_meta: str = "",
+    include_target: bool = True,
+    context_prefilter_max_shift: int | None = None,
+) -> pd.DataFrame:
+    windows = _raw_window_dataset_for_frame(
+        raw_df=raw_df,
+        model_df=model_df,
+        history_stats=history_stats,
+        price_stats=price_stats,
+        target_col=target_col,
+        charge_start_min=charge_start_min,
+        charge_start_max=charge_start_max,
+        discharge_start_min=discharge_start_min,
+        discharge_start_max=discharge_start_max,
+        include_target=include_target,
+    )
+    baseline = prepare_baseline_windows(
+        windows,
+        score_col=baseline_window_score_col,
+        meta_path=baseline_meta,
+    )
+    return _attach_filtered_baseline_context(
+        windows,
+        baseline,
+        context_prefilter_max_shift=context_prefilter_max_shift,
+    )
+
+
+def _raw_window_dataset_for_frame(
+    raw_df: pd.DataFrame,
+    model_df: pd.DataFrame,
+    history_stats: dict[str, object],
+    price_stats: dict[str, object],
+    target_col: str,
+    charge_start_min: int,
+    charge_start_max: int,
+    discharge_start_min: int,
+    discharge_start_max: int,
     include_target: bool = True,
 ) -> pd.DataFrame:
     model_with_price = add_price_history_features(model_df, price_stats)
@@ -72,12 +110,22 @@ def _window_dataset_for_frame(
         discharge_start_max,
         include_target=include_target,
     )
-    baseline = prepare_baseline_windows(
-        windows,
-        score_col=baseline_window_score_col,
-        meta_path=baseline_meta,
-    )
-    return attach_baseline_window_context(windows, baseline)
+    return windows
+
+
+def _attach_filtered_baseline_context(
+    windows: pd.DataFrame,
+    baseline: pd.DataFrame,
+    context_prefilter_max_shift: int | None = None,
+) -> pd.DataFrame:
+    candidates = windows
+    if context_prefilter_max_shift is not None:
+        candidates = filter_windows_near_baseline_starts(
+            drop_attached_baseline_columns(candidates),
+            baseline,
+            max_abs_delta=int(context_prefilter_max_shift),
+        )
+    return attach_baseline_window_context(candidates, baseline)
 
 
 def _test_window_dataset(
@@ -91,6 +139,39 @@ def _test_window_dataset(
     discharge_start_max: int,
     test_baseline_submission: str,
     baseline_window_score_col: str,
+    context_prefilter_max_shift: int | None = None,
+) -> pd.DataFrame:
+    windows = _raw_test_window_dataset(
+        test_df=test_df,
+        history_stats=history_stats,
+        price_stats=price_stats,
+        target_col=target_col,
+        charge_start_min=charge_start_min,
+        charge_start_max=charge_start_max,
+        discharge_start_min=discharge_start_min,
+        discharge_start_max=discharge_start_max,
+    )
+    baseline = prepare_baseline_windows(
+        windows,
+        score_col=baseline_window_score_col,
+        submission_path=test_baseline_submission,
+    )
+    return _attach_filtered_baseline_context(
+        windows,
+        baseline,
+        context_prefilter_max_shift=context_prefilter_max_shift,
+    )
+
+
+def _raw_test_window_dataset(
+    test_df: pd.DataFrame,
+    history_stats: dict[str, object],
+    price_stats: dict[str, object],
+    target_col: str,
+    charge_start_min: int,
+    charge_start_max: int,
+    discharge_start_min: int,
+    discharge_start_max: int,
 ) -> pd.DataFrame:
     model_df = add_price_history_features(test_df, price_stats)
     features = build_features(model_df, history_stats=history_stats)
@@ -108,12 +189,7 @@ def _test_window_dataset(
         discharge_start_max,
         include_target=False,
     )
-    baseline = prepare_baseline_windows(
-        windows,
-        score_col=baseline_window_score_col,
-        submission_path=test_baseline_submission,
-    )
-    return attach_baseline_window_context(windows, baseline)
+    return windows
 
 
 def _make_safe5117_like_meta_from_windows(
@@ -187,6 +263,9 @@ def main() -> None:
     parser.add_argument("--use-rule-risk-gate", action="store_true")
     parser.add_argument("--risk-proba-threshold", type=float, default=1.0)
     parser.add_argument("--min-risk-expected-delta", type=float, default=0.0)
+    parser.add_argument("--rule-shape-spike-max", type=float, default=None)
+    parser.add_argument("--rule-shape-plateau-min", type=float, default=None)
+    parser.add_argument("--rule-shape-balance-min", type=float, default=None)
     parser.add_argument("--use-baseline-stability-gate", action="store_true")
     parser.add_argument("--baseline-stability-max-abs-delta", type=int, default=2)
     parser.add_argument("--charge-start-min", type=int, default=0)
@@ -245,37 +324,81 @@ def main() -> None:
     )
     price_stats = fit_price_history_features(train_df, target_col=args.target_col)
     hist_stats = fit_history_stats(add_price_history_features(train_df, price_stats), target_col=args.target_col)
+    context_prefilter_max_shift = (
+        int(args.max_shift) + int(args.baseline_stability_max_abs_delta)
+        if args.use_baseline_stability_gate
+        else int(args.max_shift)
+    )
 
-    train_windows = _window_dataset_for_frame(
-        raw_df=train_df,
-        model_df=train_df,
-        history_stats=hist_stats,
-        price_stats=price_stats,
-        target_col=args.target_col,
-        charge_start_min=args.charge_start_min,
-        charge_start_max=args.charge_start_max,
-        discharge_start_min=args.discharge_start_min,
-        discharge_start_max=args.discharge_start_max,
-        baseline_window_score_col=args.baseline_window_score_col,
-        baseline_meta=args.train_baseline_meta,
-        include_target=True,
-    )
-    val_windows = _window_dataset_for_frame(
-        raw_df=val_df,
-        model_df=val_df,
-        history_stats=hist_stats,
-        price_stats=price_stats,
-        target_col=args.target_col,
-        charge_start_min=args.charge_start_min,
-        charge_start_max=args.charge_start_max,
-        discharge_start_min=args.discharge_start_min,
-        discharge_start_max=args.discharge_start_max,
-        baseline_window_score_col=args.baseline_window_score_col,
-        baseline_meta=args.val_baseline_meta,
-        include_target=True,
-    )
-    train_stability_reference = baseline_meta_from_attached_windows(train_windows)
-    val_stability_reference = baseline_meta_from_attached_windows(val_windows)
+    source_mode_needs_raw_windows = args.baseline_mode == "safe5117-source-model"
+    if source_mode_needs_raw_windows:
+        train_windows = _raw_window_dataset_for_frame(
+            raw_df=train_df,
+            model_df=train_df,
+            history_stats=hist_stats,
+            price_stats=price_stats,
+            target_col=args.target_col,
+            charge_start_min=args.charge_start_min,
+            charge_start_max=args.charge_start_max,
+            discharge_start_min=args.discharge_start_min,
+            discharge_start_max=args.discharge_start_max,
+            include_target=True,
+        )
+        val_windows = _raw_window_dataset_for_frame(
+            raw_df=val_df,
+            model_df=val_df,
+            history_stats=hist_stats,
+            price_stats=price_stats,
+            target_col=args.target_col,
+            charge_start_min=args.charge_start_min,
+            charge_start_max=args.charge_start_max,
+            discharge_start_min=args.discharge_start_min,
+            discharge_start_max=args.discharge_start_max,
+            include_target=True,
+        )
+        train_stability_reference = prepare_baseline_windows(
+            train_windows,
+            score_col=args.baseline_window_score_col,
+            meta_path=args.train_baseline_meta,
+        )
+        val_stability_reference = prepare_baseline_windows(
+            val_windows,
+            score_col=args.baseline_window_score_col,
+            meta_path=args.val_baseline_meta,
+        )
+    else:
+        train_windows = _window_dataset_for_frame(
+            raw_df=train_df,
+            model_df=train_df,
+            history_stats=hist_stats,
+            price_stats=price_stats,
+            target_col=args.target_col,
+            charge_start_min=args.charge_start_min,
+            charge_start_max=args.charge_start_max,
+            discharge_start_min=args.discharge_start_min,
+            discharge_start_max=args.discharge_start_max,
+            baseline_window_score_col=args.baseline_window_score_col,
+            baseline_meta=args.train_baseline_meta,
+            include_target=True,
+            context_prefilter_max_shift=context_prefilter_max_shift,
+        )
+        val_windows = _window_dataset_for_frame(
+            raw_df=val_df,
+            model_df=val_df,
+            history_stats=hist_stats,
+            price_stats=price_stats,
+            target_col=args.target_col,
+            charge_start_min=args.charge_start_min,
+            charge_start_max=args.charge_start_max,
+            discharge_start_min=args.discharge_start_min,
+            discharge_start_max=args.discharge_start_max,
+            baseline_window_score_col=args.baseline_window_score_col,
+            baseline_meta=args.val_baseline_meta,
+            include_target=True,
+            context_prefilter_max_shift=context_prefilter_max_shift,
+        )
+        train_stability_reference = baseline_meta_from_attached_windows(train_windows)
+        val_stability_reference = baseline_meta_from_attached_windows(val_windows)
     if args.baseline_mode == "safe5117-like":
         train_source = _make_safe5117_like_meta_from_windows(
             train_windows,
@@ -309,15 +432,18 @@ def main() -> None:
             train_baseline_mode=args.source_train_baseline_mode,
             threshold=args.source_threshold,
         )
-        train_windows = attach_baseline_window_context(
-            drop_attached_baseline_columns(
-                _filter_windows_to_baseline_dates(train_windows, source_baseline.train_meta)
+        train_windows = _attach_filtered_baseline_context(
+            _filter_windows_to_baseline_dates(
+                drop_attached_baseline_columns(train_windows),
+                source_baseline.train_meta,
             ),
             source_baseline.train_meta,
+            context_prefilter_max_shift=context_prefilter_max_shift,
         )
-        val_windows = attach_baseline_window_context(
+        val_windows = _attach_filtered_baseline_context(
             drop_attached_baseline_columns(val_windows),
             source_baseline.predict_meta,
+            context_prefilter_max_shift=context_prefilter_max_shift,
         )
         source_artifact_prefix = Path(args.val_window_output).with_suffix("")
         source_baseline.train_meta.to_csv(
@@ -411,7 +537,13 @@ def main() -> None:
             require_baseline_stability=args.use_baseline_stability_gate,
         )
         rule_risk_gate = fit_rule_risk_gate(train_stage1)
-        val_scored = add_rule_risk_predictions_to_scored_windows(val_scored, rule_risk_gate)
+        val_scored = add_rule_risk_predictions_to_scored_windows(
+            val_scored,
+            rule_risk_gate,
+            post_shape_spike_max=args.rule_shape_spike_max,
+            post_shape_plateau_min=args.rule_shape_plateau_min,
+            post_shape_balance_min=args.rule_shape_balance_min,
+        )
     day_metrics = select_daily_replacements(
         val_scored,
         proba_threshold=args.proba_threshold,
@@ -432,21 +564,41 @@ def main() -> None:
 
     full_price_stats = fit_price_history_features(df, target_col=args.target_col)
     full_hist_stats = fit_history_stats(add_price_history_features(df, full_price_stats), target_col=args.target_col)
-    full_windows = _window_dataset_for_frame(
-        raw_df=df,
-        model_df=df,
-        history_stats=full_hist_stats,
-        price_stats=full_price_stats,
-        target_col=args.target_col,
-        charge_start_min=args.charge_start_min,
-        charge_start_max=args.charge_start_max,
-        discharge_start_min=args.discharge_start_min,
-        discharge_start_max=args.discharge_start_max,
-        baseline_window_score_col=args.baseline_window_score_col,
-        baseline_meta=args.train_baseline_meta,
-        include_target=True,
-    )
-    full_stability_reference = baseline_meta_from_attached_windows(full_windows)
+    if source_mode_needs_raw_windows:
+        full_windows = _raw_window_dataset_for_frame(
+            raw_df=df,
+            model_df=df,
+            history_stats=full_hist_stats,
+            price_stats=full_price_stats,
+            target_col=args.target_col,
+            charge_start_min=args.charge_start_min,
+            charge_start_max=args.charge_start_max,
+            discharge_start_min=args.discharge_start_min,
+            discharge_start_max=args.discharge_start_max,
+            include_target=True,
+        )
+        full_stability_reference = prepare_baseline_windows(
+            full_windows,
+            score_col=args.baseline_window_score_col,
+            meta_path=args.train_baseline_meta,
+        )
+    else:
+        full_windows = _window_dataset_for_frame(
+            raw_df=df,
+            model_df=df,
+            history_stats=full_hist_stats,
+            price_stats=full_price_stats,
+            target_col=args.target_col,
+            charge_start_min=args.charge_start_min,
+            charge_start_max=args.charge_start_max,
+            discharge_start_min=args.discharge_start_min,
+            discharge_start_max=args.discharge_start_max,
+            baseline_window_score_col=args.baseline_window_score_col,
+            baseline_meta=args.train_baseline_meta,
+            include_target=True,
+            context_prefilter_max_shift=context_prefilter_max_shift,
+        )
+        full_stability_reference = baseline_meta_from_attached_windows(full_windows)
     if args.baseline_mode == "safe5117-like":
         full_source = _make_safe5117_like_meta_from_windows(
             full_windows,
@@ -470,11 +622,13 @@ def main() -> None:
             train_baseline_mode=args.source_train_baseline_mode,
             threshold=args.source_threshold,
         )
-        full_windows = attach_baseline_window_context(
-            drop_attached_baseline_columns(
-                _filter_windows_to_baseline_dates(full_windows, full_source_baseline.train_meta)
+        full_windows = _attach_filtered_baseline_context(
+            _filter_windows_to_baseline_dates(
+                drop_attached_baseline_columns(full_windows),
+                full_source_baseline.train_meta,
             ),
             full_source_baseline.train_meta,
+            context_prefilter_max_shift=context_prefilter_max_shift,
         )
         full_source_prefix = Path(args.model_output).with_suffix("")
         full_source_baseline.train_meta.to_csv(
@@ -563,6 +717,9 @@ def main() -> None:
         "use_rule_risk_gate": args.use_rule_risk_gate,
         "risk_proba_threshold": args.risk_proba_threshold,
         "min_risk_expected_delta": args.min_risk_expected_delta,
+        "rule_shape_spike_max": args.rule_shape_spike_max,
+        "rule_shape_plateau_min": args.rule_shape_plateau_min,
+        "rule_shape_balance_min": args.rule_shape_balance_min,
         "use_baseline_stability_gate": args.use_baseline_stability_gate,
         "baseline_stability_max_abs_delta": args.baseline_stability_max_abs_delta,
         "validation_rule_risk_gate": rule_risk_gate,
@@ -633,6 +790,7 @@ def main() -> None:
             discharge_start_max=args.discharge_start_max,
             test_baseline_submission=args.test_baseline_submission,
             baseline_window_score_col=args.baseline_window_score_col,
+            context_prefilter_max_shift=args.max_shift,
         )
         if test_stability_reference is None:
             test_stability_reference = baseline_meta_from_attached_windows(test_windows)
@@ -660,6 +818,9 @@ def main() -> None:
             test_scored = add_rule_risk_predictions_to_scored_windows(
                 test_scored,
                 full_rule_risk_gate,
+                post_shape_spike_max=args.rule_shape_spike_max,
+                post_shape_plateau_min=args.rule_shape_plateau_min,
+                post_shape_balance_min=args.rule_shape_balance_min,
             )
         test_selected = select_daily_replacements(
             test_scored,

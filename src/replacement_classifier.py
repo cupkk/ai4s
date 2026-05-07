@@ -796,6 +796,9 @@ def fit_rule_risk_gate(
 def add_rule_risk_predictions_to_scored_windows(
     scored_windows: pd.DataFrame,
     gate: dict[str, float],
+    post_shape_spike_max: float | None = None,
+    post_shape_plateau_min: float | None = None,
+    post_shape_balance_min: float | None = None,
 ) -> pd.DataFrame:
     out = scored_windows.copy()
     net = out["delta_vs_baseline_spread_net_load"].astype(float)
@@ -851,6 +854,32 @@ def add_rule_risk_predictions_to_scored_windows(
     out[f"{RISK_PROBA_COL}_std"] = 0.0
     out[RISK_EXPECTED_DELTA_COL] = out[RULE_RISK_SCORE_COL]
     out.loc[~structural_pass, RISK_EXPECTED_DELTA_COL] = -999.0
+
+    post_shape_pass = pd.Series(True, index=out.index)
+    if post_shape_spike_max is not None:
+        out["risk_rule_post_shape_spike_margin"] = (
+            float(post_shape_spike_max) - out[DISCHARGE_SPIKE_RISK_COL].astype(float)
+        )
+        post_shape_pass &= out["risk_rule_post_shape_spike_margin"].astype(float) >= 0.0
+    else:
+        out["risk_rule_post_shape_spike_margin"] = np.nan
+    if post_shape_plateau_min is not None:
+        out["risk_rule_post_shape_plateau_margin"] = (
+            out[DISCHARGE_PLATEAU_STRENGTH_COL].astype(float) - float(post_shape_plateau_min)
+        )
+        post_shape_pass &= out["risk_rule_post_shape_plateau_margin"].astype(float) >= 0.0
+    else:
+        out["risk_rule_post_shape_plateau_margin"] = np.nan
+    if post_shape_balance_min is not None:
+        out["risk_rule_post_shape_balance_margin"] = (
+            out["discharge_shape_risk_balance"].astype(float) - float(post_shape_balance_min)
+        )
+        post_shape_pass &= out["risk_rule_post_shape_balance_margin"].astype(float) >= 0.0
+    else:
+        out["risk_rule_post_shape_balance_margin"] = np.nan
+    out["risk_rule_post_shape_pass"] = post_shape_pass.astype(float)
+    out.loc[~post_shape_pass, RISK_PROBA_COL] = 0.0
+    out.loc[~post_shape_pass, RISK_EXPECTED_DELTA_COL] = -999.0
     out[f"{RISK_EXPECTED_DELTA_COL}_std"] = 0.0
     return out
 

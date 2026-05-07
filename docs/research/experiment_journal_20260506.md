@@ -644,6 +644,236 @@ reason=shape-balance 真实正样本诊断完成，但 hard-pass formal rolling 
 2. 再做一阶段候选稳定性校准，例如只接受跨 seed / 跨 rerun 都出现的日级候选。
 3. 只有 formal rolling 在稳定候选集合上恢复 `proposed_days>0` 且无大额误报，再进入测试期 manifest。
 
+## 2026-05-06 更新：采纳高分路线规划后的 P0 执行
+
+### 对规划的判断
+
+用户给出的规划方向总体正确：后续任务必须围绕线上分数、掉分风险和可解释汇报，而不是追求模型复杂度。需要收紧的地方是：
+
+1. `threshold_by_month`、固定 threshold、不交易阈值只能作为研究方向，不能直接作为提交方向，因为 `output_safe5117_skip_t500.csv` 线上已经从 `5117.832037755039` 掉到 `4987.610162489461`。
+2. rolling validation 是过滤器，不是提交许可。真正提交前仍必须满足 5117 保底 action diff、`changed_days=1`、`blocked=False manifest` 和守门脚本 PASS。
+3. 当前最稳的路线仍是“保底锚点 + 单日替换 + formal rolling 低误报”，不是整套模型替换。
+
+### P0 保底复核
+
+已确认：
+
+```text
+outputs/output_nwp_unconstrained_online5117.csv exists=True
+output.csv exists=True
+output.csv SHA256 = AD83C1BE3298381D39CC0848ACBE4E664A8E0860E9333D75BE7073C64D6D0AF8
+outputs/output_nwp_unconstrained_online5117.csv SHA256 = AD83C1BE3298381D39CC0848ACBE4E664A8E0860E9333D75BE7073C64D6D0AF8
+python -m src.check_submission --submission output.csv
+submission_check=rows=5664, days=59, traded_days=59, errors=0, warnings=0
+```
+
+解释：根目录 `output.csv` 仍然是 5117 保底文件，没有被本地训练或候选生成覆盖。
+
+### P0 乱码价格列名修复
+
+发现并修复了多个会输出乱码价格列名的脚本。修复前的列名是：
+
+```text
+鐎圭偞妞傛禒閿嬬壐
+```
+
+已统一改为：
+
+```text
+实时价格
+```
+
+修改文件：
+
+```text
+src/make_robust_submission.py
+src/train_lgb_ranker.py
+src/train_quantile_lgb.py
+src/train_residual_lgb.py
+src/train_trade_classifier.py
+src/train_window_ranker.py
+```
+
+验证：
+
+```text
+Select-String -Path src\*.py,scripts\*.ps1,*.py -Pattern "鐎|偞|妞|閿" -Encoding UTF8
+no matches
+
+python -m compileall src
+passed
+
+python -m src.check_submission --submission output.csv
+submission_check=rows=5664, days=59, traded_days=59, errors=0, warnings=0
+```
+
+解释：这是格式风险修复，不改变当前 `output.csv` 的 `power`，也不生成任何新候选。
+
+### rolling 与守门入口复核
+
+已复核：
+
+```text
+python -m src.rolling_validate --help
+python -m src.guard_submission_candidate --help
+python -m src.analyze_submission_diff --help
+scripts/run_pipeline.ps1
+```
+
+结论：
+
+1. `rolling_validate.py` 支持多折验证，可作为后续研究过滤器。
+2. `guard_submission_candidate.py` 支持 reference、candidate、manifest 和 `max_changed_days`，仍是提交前守门入口。
+3. `run_pipeline.ps1` 默认在存在 `outputs/output_nwp_unconstrained_online5117.csv` 时复制线上保底到根目录 `output.csv`，没有默认用本地最高候选覆盖。
+
+### 当前决策
+
+```text
+submit_allowed=false
+recommended_submission=output.csv
+new_candidate_generated=false
+reason=P0 只完成保底复核和格式修复；formal rolling 尚未恢复 proposed_days>0，不能进入测试期 manifest
+```
+
+### 后续任务优先级
+
+下一步建议按这个顺序继续：
+
+1. 固定 scored windows 做纯规则 replay，先验证二阶段规则本身能否稳定区分 `2025-12-30` 与 `2025-12-31`。
+2. 做一阶段候选稳定性 gate，例如只保留跨 seed / 跨 rerun 都出现的日级候选。
+3. rolling validation 只用于过滤和解释，不直接覆盖 `output.csv`。
+4. threshold / uncertainty / 轻窗口约束可以继续研究，但必须回到“单日替换、changed_days=1、manifest PASS”的提交框架。
+
+## 2026-05-06 更新：固定 scored windows 规则回放与一阶段稳定性 gate
+
+### 操作
+
+新增只读 replay 工具：
+
+```text
+src/replay_scored_replacement_rules.py
+```
+
+用途：
+
+1. 读取已经存在的 `fold_*_scored_windows.csv`。
+2. 不重新训练、不读取 `.nc`、不生成 submission。
+3. 在固定 scored windows 上复现 `select_daily_replacements`。
+4. 输出每个 source/fold 的 `proposed_days`、误报、收益。
+5. 输出一阶段日级候选稳定性表，检查跨 scored source 是否选同一天同一窗口。
+
+回放输入：
+
+```text
+outputs/replacement_classifier_topk10_safe5117source_ms8_p040_rulegate_minrisk010_stability4_shape_rolling_scored_20260506/
+outputs/replacement_classifier_topk10_safe5117source_ms8_p040_rulegate_minrisk010_stability4_shape_balance_rolling_scored_20260506/
+outputs/replacement_classifier_topk10_safe5117source_ms8_p040_rulegate_minrisk010_stability4_shape_balance_hardpass_s42_rolling_scored_20260506/
+```
+
+回放输出：
+
+```text
+outputs/scored_rule_replay_detail_20260506.csv
+outputs/scored_rule_replay_summary_20260506.csv
+outputs/scored_rule_replay_stage1_20260506.csv
+outputs/scored_rule_replay_stage1_stability_20260506.csv
+outputs/scored_rule_replay_stage1_stability_summary_20260506.csv
+```
+
+### 规则回放结果
+
+```text
+source=shape
+proposed_days=2
+positive_selected_days=1
+false_positive_days=1
+total_delta_profit=-2036.071576
+worst_selected_delta=-3308.616311
+
+source=shape_balance
+proposed_days=0
+false_positive_days=0
+total_delta_profit=0
+
+source=hardpass_s42
+proposed_days=0
+false_positive_days=0
+total_delta_profit=0
+```
+
+解释：
+
+1. 不加 shape-balance 时可以恢复提案，但恢复的是“一正一大负”，仍不可提交。
+2. 加 shape-balance 后误报被压住，但 `proposed_days=0`。
+3. hardpass 版本没有恢复正样本。
+
+### 一阶段稳定性 gate 结果
+
+稳定性 gate 设置：
+
+```text
+min_source_count=2
+要求同一 fold/date 的一阶段日级候选在至少两个 scored source 中窗口一致
+```
+
+结果：
+
+```text
+stable_days=8
+stable_positive_days=3
+stable_false_positive_days=5
+stable_total_delta_profit=-6950.912939
+stable_worst_delta_profit=-3594.938876
+decision=BLOCK
+reason=stable stage1 set includes false positives
+```
+
+通俗解释：一阶段确实有一些“跨 source 稳定出现”的正样本，比如 `2025-12-27` 和 `2025-12-31`，但同一稳定集合里也有 `2025-12-30` 这种大亏误报。稳定性本身不能作为放行条件，它只能证明“模型稳定地看见了这个模式”，不能证明这个模式一定赚钱。
+
+### P1 进入判断
+
+当前不能进入 P1，也不能进入测试期 manifest。
+
+硬原因：
+
+```text
+formal/replay 未同时满足：
+proposed_days>0
+false_positive_days=0 或无 material large-loss false positive
+一阶段稳定性 gate 不含大额误报
+测试期 blocked=False manifest
+changed_days=1
+```
+
+当前状态：
+
+```text
+status=blocked_before_p1
+submit_allowed=false
+recommended_submission=output.csv
+reason=固定 scored replay 显示 shape 有大额误报，shape_balance/hardpass 为 0 提案；一阶段稳定性集合仍含大额误报
+```
+
+### 什么时候进行 P1
+
+只有当下一轮研究满足以下条件，才进行 P1：
+
+1. 固定 scored windows 的 replay 中，某个二阶段规则 `proposed_days>0`。
+2. 同一 replay 中没有大额误报，尤其不能再放出类似 `2025-12-30` 的 `-3000` 级别亏损。
+3. 一阶段稳定性 gate 后仍有正样本，且稳定集合的 `false_positive_days=0`。
+4. formal rolling 复跑后仍保持上述结果，而不是只在旧 scored windows 上成立。
+
+达成后，P1 才是：
+
+```text
+生成测试期 scored windows
+生成 blocked=False 单日 manifest
+生成 changed_days=1 的候选
+运行 check_submission / analyze_submission_diff / guard_submission_candidate
+```
+
+否则继续研究，不提交。
+
 ### 下一步
 
 下一步不要继续简单调 `baseline_stability_max_abs_delta`。更合理的是拆 `max_abs_delta=4` 的误报原因，尤其是：
@@ -743,4 +973,363 @@ total delta = +1272.544735
 ```text
 submit_allowed=false
 recommended_submission=output.csv
+```
+
+## 2026-05-06 更新：固定 scored replay 复跑与 P1 时间判断
+
+### 操作
+
+按用户要求，先复跑固定 scored windows 的纯规则 replay，再检查一阶段候选稳定性 gate。该操作只读取已有 `fold_*_scored_windows.csv`，不重新训练、不读取 `.nc`、不生成测试期 manifest，也没有修改 `output.csv`。
+
+复跑命令：
+
+```text
+python -m src.replay_scored_replacement_rules --scored-dir outputs/replacement_classifier_topk10_safe5117source_ms8_p040_rulegate_minrisk010_stability4_shape_rolling_scored_20260506 --source-name shape --scored-dir outputs/replacement_classifier_topk10_safe5117source_ms8_p040_rulegate_minrisk010_stability4_shape_balance_rolling_scored_20260506 --source-name shape_balance --scored-dir outputs/replacement_classifier_topk10_safe5117source_ms8_p040_rulegate_minrisk010_stability4_shape_balance_hardpass_s42_rolling_scored_20260506 --source-name hardpass_s42 --proba-threshold 0.40 --min-risk-expected-delta 0.10 --require-baseline-stability --detail-output outputs/scored_rule_replay_detail_20260506.csv --summary-output outputs/scored_rule_replay_summary_20260506.csv --stage1-output outputs/scored_rule_replay_stage1_20260506.csv --stage1-stability-output outputs/scored_rule_replay_stage1_stability_20260506.csv --stage1-stability-summary-output outputs/scored_rule_replay_stage1_stability_summary_20260506.csv
+```
+
+### 结果
+
+固定 replay 结果仍然不达标：
+
+```text
+shape:
+proposed_days=2
+positive_selected_days=1
+false_positive_days=1
+total_delta_profit=-2036.071576
+worst_selected_delta=-3308.616311
+
+shape_balance:
+proposed_days=0
+false_positive_days=0
+total_delta_profit=0
+
+hardpass_s42:
+proposed_days=0
+false_positive_days=0
+total_delta_profit=0
+```
+
+一阶段稳定性 gate 仍然阻断：
+
+```text
+min_source_count=2
+stable_days=8
+stable_positive_days=3
+stable_false_positive_days=5
+stable_total_delta_profit=-6950.912939
+stable_worst_delta_profit=-3594.938876
+decision=BLOCK
+reason=stable stage1 set includes false positives
+```
+
+同时确认保底文件仍安全：
+
+```text
+output.csv SHA256 = AD83C1BE3298381D39CC0848ACBE4E664A8E0860E9333D75BE7073C64D6D0AF8
+outputs/output_nwp_unconstrained_online5117.csv SHA256 = AD83C1BE3298381D39CC0848ACBE4E664A8E0860E9333D75BE7073C64D6D0AF8
+python -m src.check_submission --submission output.csv
+submission_check=rows=5664, days=59, traded_days=59, errors=0, warnings=0
+```
+
+### P1 什么时候进行
+
+P1 不是按日期或提交次数启动，而是按风险守门信号启动。当前不进入 P1。
+
+P1 的启动条件固定为：
+
+```text
+1. 固定 scored windows replay 恢复 proposed_days>0
+2. 固定 replay 没有大额误报，优先要求 false_positive_days=0
+3. 一阶段候选稳定性 gate 后仍有 stable_positive_days>0
+4. 一阶段稳定性 gate 的 stable_false_positive_days=0
+5. 加入同一套规则后，formal rolling 重新训练仍复现 proposed_days>0 且 false_positive_days=0
+```
+
+只有这些条件同时满足，才进入 P1。P1 的内容是生成测试期 scored windows、生成 `blocked=False` 单日 manifest、生成 `changed_days=1` 候选，并运行 `check_submission`、`analyze_submission_diff`、`guard_submission_candidate`。
+
+### 决策
+
+当前阶段仍是 P0/P0.5 风险校准，不是 P1。
+
+原因很直接：固定 replay 已经证明当前规则要么放出少量候选但包含 `-3308` 级别大亏误报，要么完全没有候选；一阶段稳定性也没有过滤掉误报，反而保留了 5 个 false positive。因此现在做测试期 manifest 只是在没有验证通过的情况下冒险。
+
+### 下一步
+
+下一步继续做二阶段风险校准，而不是生成测试候选：
+
+```text
+1. 在 scored windows 上增加或回放尖峰移出风险、平台强度、窗口形态平衡特征。
+2. 先用固定 replay 验证能否同时恢复 proposed_days>0 且 false_positive_days=0。
+3. 再跑 formal rolling 重新训练确认不是旧 scored 文件偶然成立。
+4. formal rolling 达标后，当场进入 P1。
+```
+
+提交状态保持：
+
+```text
+submit_allowed=false
+recommended_submission=output.csv
+candidate_manifest_generated=false
+p1_allowed=false
+```
+
+## 2026-05-06 更新：严格 full train/test 跑通，但测试期仍无可提交候选
+
+### 做了什么
+
+继续执行“正式 rolling 达标后才进入测试期”的路线。本轮先修复 `safe5117-source-model`
+在 full train/test 路径里的工程问题：
+
+```text
+src/train_replacement_classifier.py
+```
+
+修复点：
+
+```text
+1. 将窗口构建拆成 raw windows 与 attach baseline context 两步。
+2. safe5117-source-model 模式下不再先按 proxy baseline 预过滤。
+3. 先生成同源 source-model baseline meta，再按 source baseline 附近窗口过滤。
+4. 测试期仍以真实 5117 保底提交文件作为替换锚点，只把 source-model baseline 用作稳定性参考。
+```
+
+这样做的原因很直接：上一轮 full train/test 的错误不是模型本身，而是先按 proxy
+baseline 过滤后，把真正的 source-model baseline 行删掉了，导致：
+
+```text
+ValueError: baseline window is outside candidate grid for 2025-09-06: charge=37, discharge=60
+```
+
+### 运行命令
+
+使用严格参数重跑 full train/test：
+
+```powershell
+python -m src.train_replacement_classifier `
+  --train-feature to_sais_new\to_sais_new\train\mengxi_boundary_anon_filtered.csv `
+  --train-label to_sais_new\to_sais_new\train\mengxi_node_price_selected.csv `
+  --test-feature to_sais_new\to_sais_new\test\test_in_feature_ori.csv `
+  --nwp-dir to_sais_new\to_sais_new\all_nc `
+  --nwp-cache outputs\nwp_features_train.csv `
+  --test-baseline-submission outputs\output_nwp_unconstrained_online5117.csv `
+  --seeds 42 `
+  --max-shift 8 `
+  --daily-top-k 10 `
+  --baseline-mode safe5117-source-model `
+  --source-train-baseline-mode recent-oof `
+  --source-val-days 59 `
+  --source-threshold -1000000000000000000 `
+  --proba-threshold 0.40 `
+  --min-expected-delta -100000 `
+  --use-rule-risk-gate `
+  --risk-proba-threshold 1.0 `
+  --min-risk-expected-delta 0.10 `
+  --rule-shape-spike-max 0.10 `
+  --rule-shape-plateau-min 0.10 `
+  --use-baseline-stability-gate `
+  --baseline-stability-max-abs-delta 4 `
+  --source-num-boost-round 500 `
+  --source-early-stopping-rounds 50 `
+  --num-boost-round 500 `
+  --early-stopping-rounds 50
+```
+
+### 结果
+
+full train/test 已跑通，输出：
+
+```text
+outputs/test_windows_replacement_classifier_topk10_safe5117source_ms8_p040_rulegate_minrisk010_stability4_postshape_s010_p010_20260506.csv
+```
+
+测试期检查：
+
+```text
+rows=590
+days=59
+pred_rank=1 rows=0
+pred_rank=1 days=0
+```
+
+因此本轮没有生成 `blocked=False` manifest，也没有生成单日 submission。
+
+### 为什么不能提交
+
+测试期不是一阶段模型完全没有信号，而是二阶段风险校准把所有信号拦住：
+
+```text
+stage1 days=59, rows=590
+baseline_stability_pass days=15, rows=150
+risk_expected_delta>=0.10 days=0, rows=0
+risk_rule_post_shape_pass days=0, rows=0
+```
+
+通俗解释：模型确实看到了一些“可能比保底窗口好”的移动，但这些移动在形态上更像
+“移出放电尖峰、换到不够强的平台”，这正是此前 `2025-12-30` 大额误报的风险结构。
+按当前守门原则，不能为了硬出候选而降低 `min-risk-expected-delta=0.10` 或放宽形态门。
+
+### baseline 漂移诊断
+
+新增两个诊断文件：
+
+```text
+outputs/baseline_drift_safe5117source_full_vs_rolling_fold04_20260506.csv
+outputs/baseline_drift_safe5117source_test_vs_safe5117_20260506.csv
+```
+
+关键发现：
+
+```text
+rolling fold_04 vs full refit overlap_days=31
+drift_days=28
+large_gt4=12
+
+test safe5117 vs source-model days=59
+stable<=4 days=15
+drift>4 days=44
+```
+
+最重要的样本：
+
+```text
+2025-12-31 rolling baseline = 48/66
+2025-12-31 full refit baseline = 47/80
+max_abs_delta=14
+```
+
+这解释了一个关键问题：formal rolling 中 `49/71` 相对 `48/66` 是正样本；
+但 full refit 后 baseline 漂到 `47/80`，同一个候选已经不再是同一个“相对保底窗口小替换”问题。
+
+### 当前决策
+
+```text
+submit_allowed=false
+recommended_submission=output.csv
+candidate_manifest_generated=false
+p1_allowed=false
+```
+
+原因：
+
+```text
+1. 测试期 pred_rank=1 为 0。
+2. 没有 blocked=False manifest。
+3. 没有 changed_days=1 候选。
+4. output.csv 仍保持 5117 保底 hash。
+```
+
+### 下一步
+
+下一步不应放宽风险阈值，而应继续处理 baseline 漂移和形态门的可迁移性：
+
+```text
+1. 拆解 test 期 baseline_stability_pass 的 15 天，确认是否存在低尖峰风险且平台强度足够的真实候选形态。
+2. 对比 rolling fold_04 与 full refit 的 source baseline，找出为什么 2025-12-31 从 48/66 漂到 47/80。
+3. 若 source baseline 漂移无法压低，应考虑把 source-model baseline 只作为稳定性参考，不再作为训练收益差锚点。
+4. 在新的 formal rolling 同时满足 proposed_days>0 且无大额误报前，继续不进入提交候选生成。
+```
+
+### 追加诊断：测试期 baseline-stable 15 天为什么仍不过
+
+新增诊断文件：
+
+```text
+outputs/test_postshape_failure_baseline_stable_best_by_day_20260506.csv
+```
+
+测试期 baseline-stable 候选漏斗：
+
+```text
+stable_rows=150
+stable_days=15
+spike_pass rows=20, days=7
+plateau_pass rows=7, days=2
+balance_pass rows=20, days=7
+structural_pass rows=90, days=13
+spike+plateau rows=0, days=0
+spike+plateau+balance rows=0, days=0
+structural+postshape rows=0, days=0
+```
+
+解释：
+
+```text
+1. 有 7 天最接近通过的候选其实没有移动放电窗口，只是单边移动充电窗口，因此 structural gate 拦住。
+2. 另外 8 天虽然同时移动充放电窗口，但放电窗口形态不够安全：要么移出尖峰风险高，要么新窗口平台强度不足。
+3. 最接近的双窗口移动样本 post_shape_min_margin 也只有 -0.167217，没有达到“差一点就能放行”的程度。
+```
+
+当前判断：
+
+```text
+不应降低 postshape 阈值硬出候选。
+当前问题更像是 baseline 锚点漂移和测试期候选形态证据不足，而不是阈值过严。
+```
+
+### 追加诊断：charge-only 微移分支
+
+因为测试期 baseline-stable 候选里有一批“放电窗口不动，只小幅移动充电窗口”的样本，
+本轮新增一个只做回放和预览的规则脚本：
+
+```text
+src/replay_charge_only_replacement_rules.py
+```
+
+该脚本只读取 scored windows，不训练模型、不读 `.nc`、不生成 submission。它用于验证：
+
+```text
+如果放电窗口保持不动，只提前或延后充电窗口，历史 fold 上是否能低误报。
+```
+
+最保守配置：
+
+```powershell
+python -m src.replay_charge_only_replacement_rules `
+  --scored-dir outputs\replacement_classifier_topk10_safe5117source_ms8_p040_rulegate_minrisk010_stability4_postshape_s010_p010_rolling_scored_20260506 `
+  --source-name charge_earlier_abs1 `
+  --proba-threshold 0.40 `
+  --min-expected-delta -100000 `
+  --require-baseline-stability `
+  --direction earlier `
+  --max-abs-charge-delta 1 `
+  --detail-output outputs\charge_only_replay_detail_earlier_abs1_20260506.csv `
+  --summary-output outputs\charge_only_replay_summary_earlier_abs1_20260506.csv `
+  --test-window-input outputs\test_windows_replacement_classifier_topk10_safe5117source_ms8_p040_rulegate_minrisk010_stability4_postshape_s010_p010_20260506.csv `
+  --test-preview-output outputs\test_charge_only_earlier_abs1_preview_20260506.csv
+```
+
+历史 replay 结果：
+
+```text
+fold_1 days=0
+fold_2 days=0
+fold_3 days=1, positive_days=1, false_positive_days=0, total_delta_profit=63.627237
+fold_4 days=0
+all days=1, positive_days=1, false_positive_days=0
+```
+
+测试期预览：
+
+```text
+preview_days=4
+2026-01-03: 50/68 -> 49/68
+2026-01-22: 51/69 -> 50/69
+2026-01-27: 52/69 -> 51/69
+2026-02-18: 54/73 -> 53/73
+```
+
+判断：
+
+```text
+charge-only 分支比移动放电窗口更低风险，因为不会错过放电尖峰。
+但当前历史证据只有 1 个正样本，样本量太薄，不能直接生成 manifest 或 submission。
+```
+
+下一步如果继续这条线，应把 charge-only 作为独立 formal rolling 分支，而不是放宽 postshape：
+
+```text
+1. 扩大 rolling folds 或复用更多 scored windows 检查 charge-only。
+2. 只接受至少多个 fold 有 proposed_days 且 false_positive_days=0 的规则。
+3. 达标后才允许进入测试期 manifest；当前仍不提交。
 ```

@@ -255,7 +255,7 @@ def main() -> None:
         test_x = align_feature_frame(test_features.frame, full_feature_columns)
         test_base = _base_prediction(test_features.frame, args.residual_base_col)
         test_pred = test_base + _predict_ensemble(final_models, model_paths, test_x, best_iterations)
-        pred_out = pd.DataFrame({TIME_COL: test_df[TIME_COL].to_numpy(), "鐎圭偞妞傛禒閿嬬壐": test_pred})
+        pred_out = pd.DataFrame({TIME_COL: test_df[TIME_COL].to_numpy(), "实时价格": test_pred})
         Path(args.prediction_output).parent.mkdir(parents=True, exist_ok=True)
         pred_out.to_csv(args.prediction_output, index=False)
         submission, meta = generate_strategy(
