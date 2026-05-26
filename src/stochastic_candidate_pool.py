@@ -9,6 +9,8 @@ from typing import Iterable, Optional, Sequence
 import numpy as np
 import pandas as pd
 
+from .offline_policy_improvement import add_submission_price_features
+from .residual_scenario_generator import DEFAULT_SCENARIO_PREFIX
 from .storage_optimizer import infer_price_column
 from .stochastic_optimizer import generate_stochastic_strategy
 
@@ -35,6 +37,10 @@ def parse_blocked_dates(text: str) -> set[str]:
 
 
 def default_scenario_sets(df: pd.DataFrame) -> list[ScenarioSet]:
+    residual_cols = sorted(col for col in df.columns if col.startswith(DEFAULT_SCENARIO_PREFIX))
+    if len(residual_cols) >= 2:
+        return [("residual_day_resample", residual_cols)]
+
     seed_cols = [col for col in df.columns if col.startswith("pred_price_seed")]
     if len(seed_cols) >= 2:
         out: list[ScenarioSet] = [("all_seed", seed_cols)]
@@ -210,6 +216,8 @@ def filter_candidate_pool(
     min_top1_top2_margin: float = 0.0,
     min_all_seed_delta: Optional[float] = None,
     min_all_seed_positive_count: int = 0,
+    min_submission_price_delta: Optional[float] = None,
+    require_multi_price_agree: bool = False,
 ) -> pd.DataFrame:
     filtered = pool.copy()
     if require_scenario_set:
@@ -226,7 +234,19 @@ def filter_candidate_pool(
         filtered = filtered.loc[
             filtered["all_seed_delta_positive_count"] >= int(min_all_seed_positive_count)
         ].copy()
+    if min_submission_price_delta is not None:
+        if "submission_price_delta" not in filtered.columns:
+            raise ValueError("min_submission_price_delta requires submission price diagnostics")
+        filtered = filtered.loc[
+            filtered["submission_price_delta"].astype(float) >= float(min_submission_price_delta)
+        ].copy()
+    if require_multi_price_agree:
+        if "multi_price_delta_agree" not in filtered.columns:
+            raise ValueError("require_multi_price_agree requires submission price diagnostics")
+        filtered = filtered.loc[filtered["multi_price_delta_agree"].astype(bool)].copy()
     sort_columns = ["delta_score", "top1_top2_margin", "expected_delta_profit"]
+    if "submission_price_delta" in filtered.columns:
+        sort_columns.insert(1, "submission_price_delta")
     if "all_seed_delta_min" in filtered.columns:
         sort_columns.insert(1, "all_seed_delta_min")
     return filtered.sort_values(sort_columns, ascending=False).reset_index(drop=True)
@@ -292,8 +312,11 @@ def manifest_from_selected(
                         "all_seed_delta_min",
                         "all_seed_delta_mean",
                         "all_seed_delta_positive_count",
+                        "submission_price_delta",
+                        "multi_price_delta_min",
                     ],
                 ),
+                **_optional_bool_fields(selected, ["multi_price_delta_agree"]),
             }
         ]
     )
@@ -304,6 +327,14 @@ def _optional_float_fields(selected: pd.Series, columns: Sequence[str]) -> dict[
     for column in columns:
         if column in selected.index and not pd.isna(selected[column]):
             values[column] = float(selected[column])
+    return values
+
+
+def _optional_bool_fields(selected: pd.Series, columns: Sequence[str]) -> dict[str, bool]:
+    values: dict[str, bool] = {}
+    for column in columns:
+        if column in selected.index and not pd.isna(selected[column]):
+            values[column] = bool(selected[column])
     return values
 
 
@@ -339,6 +370,9 @@ def main() -> None:
     parser.add_argument("--min-top1-top2-margin", type=float, default=0.0)
     parser.add_argument("--min-all-seed-delta", type=float, default=None)
     parser.add_argument("--min-all-seed-positive-count", type=int, default=0)
+    parser.add_argument("--submission-price-col", default="")
+    parser.add_argument("--min-submission-price-delta", type=float, default=None)
+    parser.add_argument("--require-multi-price-agree", action="store_true")
     parser.add_argument("--reference-score", type=float, default=0.0)
     parser.add_argument("--threshold", type=float, default=0.0)
     parser.add_argument("--charge-start-min", type=int, default=0)
@@ -369,6 +403,21 @@ def main() -> None:
     if pool.empty:
         raise SystemExit("no eligible stochastic candidates found")
     pool = add_seed_delta_diagnostics(pool, price_df)
+    if args.submission_price_col:
+        pool = add_submission_price_features(pool, reference, price_col=args.submission_price_col)
+        predicted_delta = (
+            pool["all_seed_delta_min"]
+            if "all_seed_delta_min" in pool.columns
+            else pool["expected_delta_profit"]
+        ).astype(float)
+        pool["multi_price_delta_min"] = np.minimum(
+            pool["submission_price_delta"].astype(float),
+            predicted_delta,
+        )
+        pool["multi_price_delta_agree"] = (
+            (pool["submission_price_delta"].astype(float) > 0.0)
+            & (predicted_delta > 0.0)
+        )
 
     pool = filter_candidate_pool(
         pool,
@@ -377,6 +426,8 @@ def main() -> None:
         min_top1_top2_margin=args.min_top1_top2_margin,
         min_all_seed_delta=args.min_all_seed_delta,
         min_all_seed_positive_count=args.min_all_seed_positive_count,
+        min_submission_price_delta=args.min_submission_price_delta,
+        require_multi_price_agree=args.require_multi_price_agree,
     )
     if pool.empty:
         raise SystemExit("no stochastic candidates remain after conservative filters")

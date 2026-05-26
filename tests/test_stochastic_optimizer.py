@@ -62,6 +62,22 @@ class StochasticOptimizerTests(unittest.TestCase):
             ["pred_price_seed42", "pred_price_seed2024"],
         )
 
+    def test_detect_scenario_columns_prefers_residual_scenarios(self):
+        df = pd.DataFrame(
+            {
+                "times": pd.date_range("2026-01-01", periods=2, freq="15min"),
+                "price": [1.0, 2.0],
+                "pred_price_seed42": [1.1, 2.1],
+                "resid_scenario_001": [0.9, 1.9],
+                "resid_scenario_000": [1.0, 2.0],
+            }
+        )
+
+        self.assertEqual(
+            detect_scenario_columns(df),
+            ["resid_scenario_000", "resid_scenario_001"],
+        )
+
     def test_candidate_pool_deduplicates_and_ranks(self):
         times = pd.date_range("2026-01-01", periods=96, freq="15min")
         price = np.zeros(96, dtype=float)
@@ -138,6 +154,21 @@ class StochasticOptimizerTests(unittest.TestCase):
         self.assertIn("all_seed", names)
         self.assertIn("seed_pair_pred_price_seed42_pred_price_seed2024", names)
 
+    def test_default_scenario_sets_use_residual_scenarios_first(self):
+        df = pd.DataFrame(
+            {
+                "pred_price_seed42": [1.0],
+                "pred_price_seed2024": [1.0],
+                "resid_scenario_000": [1.0],
+                "resid_scenario_001": [1.0],
+            }
+        )
+
+        self.assertEqual(
+            default_scenario_sets(df),
+            [("residual_day_resample", ["resid_scenario_000", "resid_scenario_001"])],
+        )
+
     def test_filter_candidate_pool_requires_conservative_settings(self):
         pool = pd.DataFrame(
             [
@@ -165,6 +196,41 @@ class StochasticOptimizerTests(unittest.TestCase):
             require_scenario_set="all_seed",
             min_risk_lambda=0.1,
             min_top1_top2_margin=1.0,
+        )
+
+        self.assertEqual(len(filtered), 1)
+        self.assertEqual(filtered.iloc[0]["date"], "2026-01-02")
+
+    def test_filter_candidate_pool_can_require_submission_price_delta(self):
+        pool = pd.DataFrame(
+            [
+                {
+                    "date": "2026-01-01",
+                    "scenario_set": "residual_day_resample",
+                    "risk_lambda": 0.5,
+                    "top1_top2_margin": 1.0,
+                    "delta_score": 100.0,
+                    "expected_delta_profit": 100.0,
+                    "submission_price_delta": -1.0,
+                    "multi_price_delta_agree": False,
+                },
+                {
+                    "date": "2026-01-02",
+                    "scenario_set": "residual_day_resample",
+                    "risk_lambda": 0.5,
+                    "top1_top2_margin": 1.0,
+                    "delta_score": 50.0,
+                    "expected_delta_profit": 50.0,
+                    "submission_price_delta": 2.0,
+                    "multi_price_delta_agree": True,
+                },
+            ]
+        )
+
+        filtered = filter_candidate_pool(
+            pool,
+            min_submission_price_delta=0.0,
+            require_multi_price_agree=True,
         )
 
         self.assertEqual(len(filtered), 1)

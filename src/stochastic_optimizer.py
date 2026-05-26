@@ -9,6 +9,7 @@ from typing import Iterable, Optional
 import numpy as np
 import pandas as pd
 
+from .residual_scenario_generator import DEFAULT_SCENARIO_PREFIX
 from .storage_optimizer import infer_price_column
 
 
@@ -33,6 +34,10 @@ def detect_scenario_columns(df: pd.DataFrame, explicit: str = "") -> list[str]:
         if missing:
             raise ValueError(f"scenario columns not found: {missing}")
         return columns
+
+    residual_cols = [col for col in df.columns if col.startswith(DEFAULT_SCENARIO_PREFIX)]
+    if residual_cols:
+        return sorted(residual_cols)
 
     seed_cols = [col for col in df.columns if col.startswith("pred_price_seed")]
     if seed_cols:

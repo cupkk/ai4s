@@ -1,5 +1,179 @@
 # experiment journal 20260526
 
+## 2026-05-26 break-even residual+seed 可提交候选生成
+
+用户要求继续执行并生成可提交候选。本轮没有强行提交上一轮 residual stochastic pool top1，因为它的 `submission_price_delta` 为负；改为枚举 5135 锚点附近的单日小位移动作，寻找同时满足以下条件的候选：
+
+```text
+1. 不命中失败日期黑名单：2026-01-05/01-11/01-18/01-22/01-23/01-27/02-02
+2. 相对 5135 锚点只改 1 天
+3. max_abs_start_delta <= 1
+4. submission_price_delta >= 0
+5. pred_seed_delta_min >= 1
+6. residual_delta_p10 >= 0
+7. residual_positive_rate = 1.0
+```
+
+新增代码：
+```text
+src/breakeven_candidate_scanner.py
+tests/test_breakeven_candidate_scanner.py
+```
+
+性能修正：初版扫描器先对所有宽位移候选计算 residual 场景，`max_shift=16` 时过慢；已改为先用便宜的 `submission_price_delta` 和 seed delta 预过滤，再只对候选子集计算 residual 场景收益。
+
+扫描结论：
+```text
+严格正向 submission_price_delta > 0 的候选数量 = 0
+submission_price_delta = 0 且 seed/residual 全正的候选存在
+```
+
+最终选择的低风险 break-even 探针：
+```text
+candidate=outputs/output_breakeven_residual_seed_online5135_20260526.csv
+sha256=405E748172552BE4DBA5F1AF457B05D4E80F4E7FBAB9B232D2D6E00F35CE6DC4
+manifest=outputs/breakeven_residual_seed_manifest_online5135_20260526.csv
+pool=outputs/breakeven_residual_seed_candidate_pool_online5135_20260526.csv
+date=2026-02-19
+baseline=charge=42-49;discharge=74-81
+candidate=charge=43-50;discharge=74-81
+changed_days=1
+max_abs_start_delta=1
+submission_price_delta=0.0
+pred_seed_delta_min=+380.704030
+pred_seed_delta_mean=+524.353152
+residual_delta_p10=+500.432315
+residual_delta_min=+310.930410
+residual_positive_rate=1.0
+```
+
+验证：
+```text
+python -m src.check_submission --submission output.csv
+submission_check=rows=5664, days=59, traded_days=59, errors=0, warnings=0
+
+python -m src.guard_submission_candidate --candidate output.csv --reference outputs/output_stochastic_conservative_online5135_20260526.csv --reference-name online5135 --candidate-name output_current --baseline-score 5135.148567685195 --manifest outputs/breakeven_residual_seed_manifest_online5135_20260526.csv --max-changed-days 1
+decision=PASS
+changed_date=2026-02-19
+changed_actions:
+  2026-02-19: charge=42-49;discharge=74-81 -> charge=43-50;discharge=74-81
+```
+
+当前 `output.csv` 已同步为该候选：
+```text
+output.csv sha256=405E748172552BE4DBA5F1AF457B05D4E80F4E7FBAB9B232D2D6E00F35CE6DC4
+rollback_anchor=outputs/output_stochastic_conservative_online5135_20260526.csv
+rollback_anchor_sha256=7A11E1D8B0D2D3ADCA8368F17E29AF7F8A7E966D13FCF2A1E2784B06A3B8A14C
+```
+
+提交建议：
+```text
+submit=output.csv
+candidate_type=break-even low-risk probe
+expected_behavior=不依赖 submission-price 正收益，只依赖 seed/residual 一致认为微调更好；因此若线上不涨分，应立即回滚 5135 锚点。
+```
+
+## 2026-05-26 V2.0 残差整日重采样场景执行结果
+
+本轮按 V2.0 方案 A 执行：不再把 seed/分位数列直接当作互相独立的场景，而是从 2025 验证集抽取完整 96 点日残差向量，再叠加到 2026 测试期的 seed 均值基准预测上。目标是保留误差的日内时间自相关，修复 stochastic optimizer 的场景崩塌问题。
+
+代码改动：
+```text
+src/residual_scenario_generator.py
+src/stochastic_optimizer.py
+src/stochastic_candidate_pool.py
+tests/test_residual_scenario_generator.py
+tests/test_stochastic_optimizer.py
+```
+
+新增能力：
+```text
+1. 从 outputs/val_predictions_nwp.csv 提取整日残差库：true A - mean(pred_price_seed*)
+2. 为 outputs/test_predictions_nwp.csv 生成 resid_scenario_000 ... resid_scenario_099
+3. 输出 source map，记录每个测试日每条场景来自哪个历史残差日
+4. 输出场景诊断：lag1 autocorr、mean abs diff、slot std、source day coverage
+5. stochastic optimizer / candidate pool 默认优先识别 resid_scenario_* 场景列
+6. stochastic_candidate_pool 增加 submission_price_delta / multi_price_delta_agree 过滤入口
+```
+
+生成文件：
+```text
+outputs/test_predictions_residual_scenarios_20260526.csv
+outputs/residual_scenario_source_map_20260526.csv
+outputs/residual_scenario_diagnostics_20260526.csv
+outputs/residual_library_diagnostics_20260526.csv
+outputs/residual_scenario_candidate_pool_online5135_20260526.csv
+outputs/output_residual_scenario_pool_top1_online5135_20260526.csv
+outputs/residual_scenario_pool_top1_manifest_online5135_20260526.csv
+```
+
+场景质量诊断：
+```text
+n_scenarios=100
+residual_days=56
+scenario_days=59
+avg_unique_source_days_per_test_day=46.644068
+residual_lag1_autocorr_mean=0.884302
+scenario_lag1_autocorr_mean=0.907934
+scenario_slot_std_mean=1.037974
+```
+
+解释：残差场景已经不是白噪声，日内连续性明显好于独立采样；因此 V2.0 方案 A 的工程通路已经打通。
+
+候选池结果：
+```text
+pool_rows=19
+positive_submission_price_delta=0
+multi_price_delta_agree=0
+max_submission_price_delta=-3.921397874584727
+```
+
+top1 研究候选：
+```text
+candidate=outputs/output_residual_scenario_pool_top1_online5135_20260526.csv
+sha256=22DD04B1A912FAEA771F4CF5C9811650386C91DB0D21BD789BC9BB00D1D1C5F7
+date=2026-01-03
+baseline=charge=50-57;discharge=68-75
+candidate=charge=52-59;discharge=70-77
+delta_score=+569.745263
+expected_delta_profit=+743.423358
+submission_price_delta=-614.8711362738704
+multi_price_delta_agree=false
+```
+
+guard 结论：
+```text
+python -m src.guard_submission_candidate --candidate outputs/output_residual_scenario_pool_top1_online5135_20260526.csv --reference outputs/output_stochastic_conservative_online5135_20260526.csv --reference-name online5135 --candidate-name residual_pool_top1 --baseline-score 5135.148567685195 --manifest outputs/residual_scenario_pool_top1_manifest_online5135_20260526.csv --max-changed-days 1
+decision=FAIL
+errors:
+  manifest submission_price_delta is negative: -614.8711362738704
+  manifest multi_price_delta_agree is false
+```
+
+当前保留锚点：
+```text
+output.csv sha256=7A11E1D8B0D2D3ADCA8368F17E29AF7F8A7E966D13FCF2A1E2784B06A3B8A14C
+reference=outputs/output_stochastic_conservative_online5135_20260526.csv
+score=5135.148567685195
+guard=PASS
+changed_days=0
+```
+
+决策：
+```text
+submit_new_candidate=false
+recommended_submission=output.csv
+reason=残差整日重采样修复了场景形态，但候选收益仍与提交价格口径方向相反；所有 residual pool 候选在 submission_price_delta 下均为负，不能占用线上提交次数。
+```
+
+下一步：
+```text
+1. 不继续提交 stochastic / residual pool 里 submission_price_delta<0 的候选。
+2. 若继续方案 A，只允许先做参数诊断：不同 random_seed、risk_lambda、max_abs_start_delta 必须先出现 submission_price_delta>=0 且 multi_price_delta_agree=true。
+3. 方案 C 的 evaluator/reranker 可以继续，但训练目标必须显式包含 submission price-column delta、历史 tail-risk 和已失败日期/动作形态黑名单；不能只按预测场景 expected_delta_profit 排序。
+4. 当前 output.csv 必须继续保持 5135 锚点，直到新候选同时通过格式、guard、submission-price、tail-risk 和失败模式检查。
+```
+
 ## 总体研究进展
 
 项目当前主线是围绕已验证线上最佳表格做单日小扰动，而不是重新生成全 59 天策略。2026-05-26 之前的最新已知线上最佳为 `5124.643279527319`，来源于随机场景链式候选；第三轮激进 pool top1 曾降到 `5113.038426444253`，因此后续候选必须加强场景一致性和守门。

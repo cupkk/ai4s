@@ -4,11 +4,46 @@
 
 这份文档只回答一个问题：现在应该提交哪个文件，哪些文件只是实验候选，哪些文件不能再当主线。
 
+## 2026-05-26 break-even 可提交候选
+
+| 文件 | 状态 | 已知线上分数 | 说明 |
+|---|---:|---:|---|
+| `output.csv` | 当前待提交候选 | 待提交 | 已同步为 `outputs/output_breakeven_residual_seed_online5135_20260526.csv`，SHA256=`405E748172552BE4DBA5F1AF457B05D4E80F4E7FBAB9B232D2D6E00F35CE6DC4`。相对 5135 锚点只改 `2026-02-19: 42/74 -> 43/74`，`check_submission` 和 `guard` 均通过。 |
+| `outputs/output_breakeven_residual_seed_online5135_20260526.csv` | 可提交候选源文件 | 待提交 | break-even 探针：`submission_price_delta=0.0`、`pred_seed_delta_min=+380.704030`、`residual_delta_p10=+500.432315`、`residual_delta_min=+310.930410`、`residual_positive_rate=1.0`。 |
+| `outputs/breakeven_residual_seed_manifest_online5135_20260526.csv` | guard manifest | 不适用 | 与候选 SHA 匹配，`multi_price_delta_agree=true`，用于证明该候选是单日小位移且非负提交价格口径。 |
+| `outputs/output_stochastic_conservative_online5135_20260526.csv` | 回滚锚点 | `5135.148567685195` | 若线上分数不高于 5135.148567685195，立刻复制该文件回 `output.csv`。 |
+
+提交后处理规则：
+```text
+submit=output.csv
+if online_score > 5135.148567685195:
+  固化 output.csv 为新的 online-best 锚点
+else:
+  Copy-Item -LiteralPath outputs/output_stochastic_conservative_online5135_20260526.csv -Destination output.csv -Force
+  将 outputs/output_breakeven_residual_seed_online5135_20260526.csv 加入排除/谨慎名单
+```
+
+## 2026-05-26 V2.0 residual 场景候选状态
+
+| 文件 | 状态 | 已知线上分数 | 说明 |
+|---|---:|---:|---|
+| `outputs/output_residual_scenario_pool_top1_online5135_20260526.csv` | 研究候选，禁止提交 | 未提交 | 整日残差重采样 stochastic pool top1；只改 `2026-01-03: 50/68 -> 52/70`，格式检查通过，但 guard 失败：`submission_price_delta=-614.8711362738704`、`multi_price_delta_agree=false`。 |
+| `outputs/residual_scenario_candidate_pool_online5135_20260526.csv` | 诊断候选池，禁止直接提交 | 不适用 | 共 19 个候选；`positive_submission_price_delta=0`、`multi_price_delta_agree=0`、`max_submission_price_delta=-3.921397874584727`。说明残差场景改善了形态，但当前候选仍与提交价格口径方向相反。 |
+| `outputs/test_predictions_residual_scenarios_20260526.csv` | 场景输入文件，不是 submission | 不适用 | 由 56 个完整历史日残差向量生成 100 条测试期场景；`scenario_lag1_autocorr_mean=0.907934`，可继续作为后续诊断输入。 |
+
+上一轮 residual pool top1 的结论：
+```text
+recommended_submission=outputs/output_stochastic_conservative_online5135_20260526.csv
+known_score=5135.148567685195
+submit_new_candidate=false for residual pool top1
+reason=V2 residual top1 及候选池没有任何 submission_price_delta>=0 的候选
+```
+
 ## 当前结论
 
 | 文件 | 状态 | 已知线上分数 | 说明 |
 |---|---:|---:|---|
-| `output.csv` | 当前推荐提交/回退锚点 | `5135.148567685195` | 已回退为 `outputs/output_stochastic_conservative_online5135_20260526.csv` 的字节级副本，SHA256=`7A11E1D8B0D2D3ADCA8368F17E29AF7F8A7E966D13FCF2A1E2784B06A3B8A14C`。 |
+| `output.csv` | 当前待提交候选 | 待提交 | 已同步为 break-even residual+seed 候选，SHA256=`405E748172552BE4DBA5F1AF457B05D4E80F4E7FBAB9B232D2D6E00F35CE6DC4`；相对 5135 锚点只改 `2026-02-19: 42/74 -> 43/74`。 |
 | `outputs/output_stochastic_conservative_online5135_20260526.csv` | 当前线上最佳锚点 | `5135.148567685195` | 第四轮保守 all-seed 候选线上提升成功，必须保留；后续所有候选都必须相对它做差异审计。 |
 | `outputs/output_offline_policy_shape_safe_online5135_20260526.csv` | 已排除 | `5087.6977470609945` | 保守离线 RL / 策略改进候选，`2026-02-02: 51/71 -> 50/73`，线上相对 5135 大幅回撤，已加入 guard 黑名单。 |
 | `outputs/output_stochastic_seedagree_online5135_20260526.csv` | 已排除 | `5129.413866405826` | 第五轮 seed-agreement 候选，`2026-01-05: 53/67 -> 53/69`，线上低于 5135，已加入 guard 黑名单。 |
