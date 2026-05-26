@@ -1,6 +1,6 @@
 # 提交候选状态表
 
-更新日期：2026-05-07
+更新日期：2026-05-26
 
 这份文档只回答一个问题：现在应该提交哪个文件，哪些文件只是实验候选，哪些文件不能再当主线。
 
@@ -8,13 +8,23 @@
 
 | 文件 | 状态 | 已知线上分数 | 说明 |
 |---|---:|---:|---|
-| `output.csv` | 当前保底提交入口 | `5117.832037755039` | 已恢复为 `outputs/output_nwp_unconstrained_online5117.csv` 的字节级副本；该分数来自 2026-04-30 02:05:29 提交的老版 `D:\github\ai4s\output.csv`。 |
-| `outputs/output_nwp_unconstrained_online5117.csv` | 线上验证保底 | `5117.832037755039` | 目前所有已验证结果里最高，必须保留；对应 2026-04-29 左右生成的老版本 output。 |
+| `output.csv` | 当前推荐提交/回退锚点 | `5135.148567685195` | 已回退为 `outputs/output_stochastic_conservative_online5135_20260526.csv` 的字节级副本，SHA256=`7A11E1D8B0D2D3ADCA8368F17E29AF7F8A7E966D13FCF2A1E2784B06A3B8A14C`。 |
+| `outputs/output_stochastic_conservative_online5135_20260526.csv` | 当前线上最佳锚点 | `5135.148567685195` | 第四轮保守 all-seed 候选线上提升成功，必须保留；后续所有候选都必须相对它做差异审计。 |
+| `outputs/output_offline_policy_shape_safe_online5135_20260526.csv` | 已排除 | `5087.6977470609945` | 保守离线 RL / 策略改进候选，`2026-02-02: 51/71 -> 50/73`，线上相对 5135 大幅回撤，已加入 guard 黑名单。 |
+| `outputs/output_stochastic_seedagree_online5135_20260526.csv` | 已排除 | `5129.413866405826` | 第五轮 seed-agreement 候选，`2026-01-05: 53/67 -> 53/69`，线上低于 5135，已加入 guard 黑名单。 |
+| `outputs/output_stochastic_chain2_online5124_20260525.csv` | 历史线上最佳锚点 | `5124.643279527319` | 第二轮随机场景候选，已被第四轮 `5135.148567685195` 超过，仍需保留作为回退链路。 |
+| `outputs/output_stochastic_conservative_online5124_20260525.csv` | 已验证提升候选 | `5135.148567685195` | 第四轮保守 all-seed 候选源文件：`2026-01-18: 56/80 -> 55/76`。已复制固化为 `outputs/output_stochastic_conservative_online5135_20260526.csv`。 |
+| `outputs/output_stochastic_pool_top1_online5124_20260525.csv` | 已排除 | `5113.038426444253` | 第三轮激进 pool top1，`2026-01-27: 52/69 -> 49/73`，双 seed、`risk_lambda=0`、低 margin，线上大幅掉分，已加入 guard 黑名单。 |
+| `outputs/output_stochastic_seed_risk025_online5118_20260525.csv` | 已验证提升锚点 | `5118.064870304419` | 第一轮随机场景单日候选，`2026-01-23: 52/70 -> 51/72`。 |
+| `outputs/output_nwp_unconstrained_online5117.csv` | 历史线上保底 | `5117.832037755039` | 早期安全锚点，必须保留；对应 2026-04-29 左右生成的老版本 output。 |
 | `outputs/output_safe5117_skip_t500.csv` | 已排除 | `4987.610162489461` | 只跳过 2026-01-11 一天仍低于保底；说明该日不应跳过。 |
 | `outputs/output_safe5117_skip_t1000.csv` | 已排除 | 未提交 | 因 `t500` 已失败，不能继续扩大 skip threshold。 |
 | `outputs/output_safe5117_skip_t1500.csv` | 已排除 | 未提交 | 因 `t500` 已失败，不能继续扩大 skip threshold。 |
 | `outputs/output_df_single_20260125_df_reg.csv` | 研究候选，禁止直接提交 | 未提交 | 收益导向窗口模型生成的单日替换候选，只改 2026-01-25；但 rolling validation 显示模型跨月不稳，manifest 已标记 `blocked=True`，守门脚本会拒绝。 |
 | `outputs/output_window_ranker_delta_reg_full.csv` | 研究输出，禁止提交 | 未提交 | 使用相对保底收益差训练出的整套 59 天窗口输出；验证 `avg_delta_profit=-9973.036823`，且不是单日替换候选，不能提交。 |
+| `outputs/output_offline_policy_online5135_20260526.csv` | 研究候选，禁止提交 | 未提交 | 初版离线策略改进候选 `2026-02-05: 56/88 -> 58/86` 虽通过基本 guard，但历史 holdout 同形态“充电后移、放电前移、间隔缩短”胜率低且均值为负，已被形态安全门排除。 |
+| `outputs/offline_policy_multiprice_candidate_pool_online5135_20260526.csv` | 诊断候选池，禁止提交 | 不适用 | P1 多口径守门输出；前 80 个离线高分候选中 `passes_policy_gate=0`，所有候选的 `submission_price_delta` 均为负，因此没有生成新 submission。 |
+| `outputs/offline_policy_tailrisk_candidate_pool_online5135_20260526.csv` | 诊断候选池，禁止提交 | 不适用 | P3 多口径 + tail-risk 守门输出；前 120 个离线高分候选中 `passes_policy_gate=0`、`submission_price_delta>=0 rows=0`、`shape_pass_count=0`，不生成新 submission。 |
 | `outputs/test_windows_replacement_classifier_ms8_p075.csv` | 研究打分输出，禁止提交 | 未提交 | 保守替换分类器输出；严格 rolling validation 下 0 提案，测试期所有 `pred_rank=999999`，不会生成可提交单日候选。 |
 | `outputs/test_windows_replacement_classifier_topk10_safe5117source_ms8_p040_rulegate_minrisk010_20260505.csv` | 研究打分输出，禁止提交 | 未提交 | 更严格 `min-risk-expected-delta=0.10` 下测试期仍无可提交候选：`pred_rank=1 days=0`，`risk_expected_delta>=0.10 days=0`。 |
 | `outputs/test_windows_replacement_classifier_topk10_safe5117source_ms8_p040_rulegate_minrisk010_stability2_v3_20260506.csv` | 研究打分输出，禁止提交 | 未提交 | 新增 baseline 稳定性 gate 后测试期出现 1 个研究信号：`2026-01-03` 从 `50/68` 微移到 `51/70`；但同参数 formal rolling 为 0 提案，缺少跨 fold 放行证据，不能生成 `blocked=False` manifest。 |
@@ -24,6 +34,9 @@
 
 | 文件 | 线上分数或本地结果 | 排除原因 |
 |---|---:|---|
+| `outputs/output_stochastic_seedagree_online5135_20260526.csv` | `5129.413866405826` | 第五轮线上失败；虽然三条 seed 回算均为正，但 `2026-01-05: 53/67 -> 53/69` 实际伤害了 5135 锚点，禁止重复提交。 |
+| `outputs/output_offline_policy_shape_safe_online5135_20260526.csv` | `5087.6977470609945` | 第六轮线上失败；虽然离线 lower bound 与三 seed 均为正，但 `2026-02-02: 51/71 -> 50/73` 在真实线上评分中大幅伤害 5135 锚点，说明离线策略奖励口径和线上利润错配。 |
+| `outputs/output_stochastic_pool_top1_online5124_20260525.csv` | `5113.038426444253` | 第三轮线上失败；双 seed、`risk_lambda=0`、`top1_top2_margin=0.028588`，`2026-01-27: 52/69 -> 49/73` 是场景过拟合动作，禁止重复提交。 |
 | `outputs/output_nwp_c0_55_d72_88.csv` | `3798.629342284567` | 2026 测试期明显过拟合；不要再提交。 |
 | `outputs/output_blend_fine_w025_t1000.csv` | `4703.505815153465` | 已线上验证低于保底。 |
 | `outputs/output_nwp_unconstrained_t2000.csv` | `4903.504068225546` | 已线上验证低于保底。 |
@@ -34,6 +47,7 @@
 | `outputs/output_df_single_20260205_df_reg.csv` | 只改 1 天，manifest blocked | 同一批研究候选，模型 margin 为 0 且 score_std 较高，不提交。 |
 | `outputs/output_df_single_20260115_df_reg.csv` | 只改 1 天，manifest blocked | 同一批研究候选，模型 margin 为 0 且 score_std 较高，不提交。 |
 | `outputs/output_window_ranker_delta_reg_full.csv` | `avg_delta_profit=-9973.036823`，测试期预测正 delta 天数为 0 | 该文件是整套模型输出，不符合“只替换 1 天”的提交策略；当前 delta 模型也没有给出任何预测正收益单日。 |
+| `outputs/output_offline_policy_online5135_20260526.csv` | holdout 形态回放不通过 | `2026-02-05: 56/88 -> 58/86` 属于“充电后移且放电前移”的间隔压缩动作；2025-02 同形态均值为负，不能提交。 |
 | `outputs/test_windows_replacement_classifier_ms8_p075.csv` | 严格阈值下 0 提案；宽松阈值误报高 | 它不是 submission 文件，只是窗口打分表；当前无法生成 `blocked=False` manifest。 |
 
 ## 线上反馈修正
@@ -63,12 +77,10 @@ outputs/action_diff_safe5117_vs_bad3798_summary.csv
 
 ## 当前最稳的下一步
 
-1. 当前回到保底：提交 `output.csv` 或 `outputs/output_nwp_unconstrained_online5117.csv`。
-2. 不再提交 `t1000/t1500`，因为 `t500` 已经低于保底。
-3. 后续如果继续冲分，只能做“不跳过 2026-01-11”的新小扰动，并且必须先过守门脚本。
-4. 不要再让 pipeline 自动用本地验证最高候选覆盖 `output.csv`。
-5. 新的收益导向窗口模型已经具备“单日候选生成 + manifest 守门”闭环，但当前模型证据不足，所有新单日候选默认 `blocked=True`。
-6. 最新 `baseline-delta` 模型已经把标签改成“相对 5117 保底窗口的单日收益差”，但验证结果为负，当前不生成线上候选。
+1. 当前不要提交新的实验候选；`output.csv` 已回退到 `5135.148567685195` 锚点。
+2. P1 多口径 reward/evaluation guard 已生效：候选必须同时通过预测场景收益、提交文件价格口径收益、历史形态回放、线上失败模式黑名单。
+3. 不再提交 `2026-02-02: 51/71 -> 50/73`、`2026-01-27: 52/69 -> 49/73`、`2026-01-05: 53/67 -> 53/69`，也不提交初版离线策略 `2026-02-05: 56/88 -> 58/86`。
+4. P3 tail-risk 重跑仍未找到新候选：`offline_policy_candidate=none`。后续若继续使用离线 RL，只允许先产出诊断表，不允许自动覆盖 `output.csv`。
 
 ## 2026-05-06 更新：严格 min-risk=0.10 与 baseline 漂移诊断
 
@@ -1335,4 +1347,273 @@ p1_allowed=false
 2. 用真实 5117 文件动作构造历史同源 baseline meta。
 3. 增加平台并列窗口稳定性特征，避免 optimizer 在等价平台上漂到很远的放电窗口。
 4. formal rolling 未同时满足 proposed_days>0、false_positive_days=0、测试期 blocked=False manifest 前，不进入提交流程。
+```
+## 2026-05-25 更新：随机场景单日候选进入 `output.csv`（待线上评分）
+
+本轮按“路径 C：随机运筹优化 + 场景生成”做小步提交探针。没有重训大模型，直接使用 `outputs/test_predictions_nwp.csv` 中的三条 seed 预测作为场景：
+
+```text
+pred_price_seed42
+pred_price_seed2024
+pred_price_seed2026
+```
+
+新增脚本：
+
+```text
+src/stochastic_optimizer.py
+```
+
+新增候选与验证产物：
+
+| 文件 | 状态 | 已知线上分数 | 说明 |
+|---|---:|---:|---|
+| `output.csv` | 当前待提交表格 | 待提交 | 已同步为本轮随机场景单日候选，SHA256=`14C5F43FCDD9E67E3B342A93A5207C33674CA03552AC7F82096E5E8326C0CFDC`。 |
+| `outputs/output_stochastic_single_day_seed_risk025_20260525.csv` | 候选源文件，待线上评分 | 待提交 | 只改 `2026-01-23` 一天：`52/70 -> 51/72`，相对 5117 基线 `changed_days=1`。 |
+| `outputs/stochastic_single_day_manifest_seed_risk025_20260525.csv` | guard manifest | 不适用 | manifest 匹配候选 SHA，`blocked=False`，记录 `pred_delta_score=+3968.318035`。 |
+| `outputs/action_diff_safe5117_vs_output_current_20260525_summary.csv` | guard 摘要 | 不适用 | `decision=PASS`，`rows=5664`，`days=59`，`changed_days=1`，`check_errors=0`，`check_warnings=0`。 |
+| `outputs/output_nwp_unconstrained_online5117.csv` | 必须保留的安全回退基线 | `5117.832037755039` | 如果本轮线上分数低于 5117，立刻恢复该文件到 `output.csv`。 |
+
+最终校验：
+
+```text
+python -m unittest tests.test_stochastic_optimizer
+OK
+
+python -m src.check_submission --submission output.csv
+submission_check=rows=5664, days=59, traded_days=59, errors=0, warnings=0
+
+python -m src.guard_submission_candidate --candidate output.csv --reference outputs/output_nwp_unconstrained_online5117.csv --candidate-name output_current --manifest outputs/stochastic_single_day_manifest_seed_risk025_20260525.csv --max-changed-days 1
+decision=PASS
+changed_date=2026-01-23
+changed_actions:
+  2026-01-23: charge=52-59;discharge=70-77 -> charge=51-58;discharge=72-79
+```
+
+提交后必须补记线上结果：
+
+```text
+if score > 5117.832037755039:
+  将本候选加入可继续扩展的小步基线池
+else:
+  Copy-Item -LiteralPath outputs/output_nwp_unconstrained_online5117.csv -Destination output.csv -Force
+  将 outputs/output_stochastic_single_day_seed_risk025_20260525.csv 加入禁止重复提交名单
+```
+
+### 2026-05-25 12:06:55 线上反馈
+
+```text
+submitted=output.csv
+sha256=14C5F43FCDD9E67E3B342A93A5207C33674CA03552AC7F82096E5E8326C0CFDC
+score=5118.064870304419
+baseline_score=5117.832037755039
+delta=+0.232832549380
+decision=ACCEPT_AS_CURRENT_ONLINE_BEST
+```
+
+当前线上最佳锚点已保存为：
+
+```text
+outputs/output_stochastic_seed_risk025_online5118_20260525.csv
+```
+
+继续迭代约束：
+
+```text
+reference=outputs/output_stochastic_seed_risk025_online5118_20260525.csv
+reference_score=5118.064870304419
+blocked_dates=2026-01-11,2026-01-23
+next_candidate_must_change_days_vs_reference=1
+```
+
+## 2026-05-25 更新：第二个随机场景单日候选进入 `output.csv`（待线上评分）
+
+本轮继续路径 C，但 reference 已从原始 5117 文件切换为线上刚验证提升的 5118 锚点：
+
+```text
+reference=outputs/output_stochastic_seed_risk025_online5118_20260525.csv
+reference_score=5118.064870304419
+blocked_dates=2026-01-11,2026-01-23
+```
+
+新增候选：
+
+| 文件 | 状态 | 已知线上分数 | 说明 |
+|---|---:|---:|---|
+| `output.csv` | 当前待提交表格 | 待提交 | 已同步为 chain2 候选，SHA256=`3AA4A21C9D9391AC22C1276720F928BC5196575DEB2FCB09199AFA46B66251A9`。 |
+| `outputs/output_stochastic_chain2_seed_risk025_20260525.csv` | 候选源文件，待线上评分 | 待提交 | 相对 5118 锚点只改 `2026-01-22` 一天：`51/69 -> 50/68`。 |
+| `outputs/stochastic_single_day_manifest_chain2_seed_risk025_20260525.csv` | guard manifest | 不适用 | manifest 匹配候选 SHA，`blocked=False`，记录 `pred_delta_score=+2369.235546`。 |
+| `outputs/action_diff_online5118_vs_output_current_20260525_summary.csv` | guard 摘要 | 不适用 | `decision=PASS`，`changed_days=1`，`check_errors=0`，`check_warnings=0`。 |
+| `outputs/action_diff_safe5117_vs_output_current_chain2_20260525_summary.csv` | 累计差异审计 | 不适用 | 相对原始 5117 安全基线累计 `changed_days=2`，日期为 `2026-01-22` 和 `2026-01-23`。 |
+
+本轮新增动作：
+
+```text
+date=2026-01-22
+reference_5118=charge=51-58;discharge=69-76
+candidate=charge=50-57;discharge=68-75
+pred_delta_score=+2369.235546
+expected_delta_profit=+2512.146124
+```
+
+最终校验：
+
+```text
+python -m src.check_submission --submission output.csv
+submission_check=rows=5664, days=59, traded_days=59, errors=0, warnings=0
+
+python -m src.guard_submission_candidate --candidate output.csv --reference outputs/output_stochastic_seed_risk025_online5118_20260525.csv --reference-name online5118 --candidate-name output_current --baseline-score 5118.064870304419 --manifest outputs/stochastic_single_day_manifest_chain2_seed_risk025_20260525.csv --max-changed-days 1
+decision=PASS
+changed_date=2026-01-22
+changed_actions:
+  2026-01-22: charge=51-58;discharge=69-76 -> charge=50-57;discharge=68-75
+```
+
+提交后必须补记线上结果：
+
+```text
+if score > 5118.064870304419:
+  固化 output.csv 为新的 online-best 锚点
+else:
+  Copy-Item -LiteralPath outputs/output_stochastic_seed_risk025_online5118_20260525.csv -Destination output.csv -Force
+  将 outputs/output_stochastic_chain2_seed_risk025_20260525.csv 加入禁止重复提交名单
+```
+
+### 2026-05-25 12:45:17 线上反馈
+
+```text
+submitted=output.csv
+sha256=3AA4A21C9D9391AC22C1276720F928BC5196575DEB2FCB09199AFA46B66251A9
+score=5124.643279527319
+previous_best=5118.064870304419
+delta=+6.578409222900
+decision=ACCEPT_AS_CURRENT_ONLINE_BEST
+```
+
+当前线上最佳锚点已保存为：
+
+```text
+outputs/output_stochastic_chain2_online5124_20260525.csv
+```
+
+继续迭代约束：
+
+```text
+reference=outputs/output_stochastic_chain2_online5124_20260525.csv
+reference_score=5124.643279527319
+blocked_dates=2026-01-11,2026-01-22,2026-01-23
+next_candidate_must_change_days_vs_reference=1
+```
+
+## 2026-05-25 更新：top-K 随机场景候选池进入 `output.csv`（待线上评分）
+
+本轮执行 A-D 后，不再只取单一 `risk_lambda=0.25/all_seed` 路径，而是批量生成候选池：
+
+```text
+src/stochastic_candidate_pool.py
+```
+
+候选池配置：
+
+```text
+reference=outputs/output_stochastic_chain2_online5124_20260525.csv
+reference_score=5124.643279527319
+risk_lambdas=0,0.1,0.25,0.5
+max_abs_start_deltas=1,2,4
+scenario_sets=all_seed + seed pairs
+blocked_dates=2026-01-11,2026-01-22,2026-01-23
+top_k=50
+```
+
+新增产物：
+
+| 文件 | 状态 | 已知线上分数 | 说明 |
+|---|---:|---:|---|
+| `output.csv` | 当前待提交表格 | 待提交 | 已同步为 pool top1 候选，SHA256=`D556061BAB752A456DF034117E2813D91A64BCDC9ECDCF54A83B03A60D6079F7`。 |
+| `outputs/output_stochastic_pool_top1_online5124_20260525.csv` | 候选源文件，待线上评分 | 待提交 | 相对 5124 锚点只改 `2026-01-27` 一天：`52/69 -> 49/73`。 |
+| `outputs/stochastic_candidate_pool_online5124_20260525.csv` | top-K 候选池 | 不适用 | 批量扫描风险权重、窗口位移和 seed 场景组合后的候选排行榜。 |
+| `outputs/stochastic_candidate_pool_top1_manifest_online5124_20260525.csv` | guard manifest | 不适用 | manifest 匹配候选 SHA，`blocked=False`，记录 pool rank 和场景配置。 |
+| `outputs/action_diff_online5124_vs_output_current_pool_top1_20260525_summary.csv` | guard 摘要 | 不适用 | `decision=PASS`，`changed_days=1`，`check_errors=0`，`check_warnings=0`。 |
+| `outputs/action_diff_safe5117_vs_output_current_pool_top1_20260525_summary.csv` | 累计差异审计 | 不适用 | 相对原始 5117 安全基线累计 `changed_days=3`。 |
+
+pool top1：
+
+```text
+date=2026-01-27
+reference_5124=charge=52-59;discharge=69-76
+candidate=charge=49-56;discharge=73-80
+scenario_set=seed_pair_pred_price_seed2024_pred_price_seed2026
+risk_lambda=0.0
+pred_delta_score=+1969.657878
+top1_top2_margin=0.028588
+```
+
+风险备注：
+
+```text
+这是更激进的 pool top1。虽然 guard 通过，但 top1_top2_margin 很小，说明窗口排序接近并列。
+如果线上失败，回退到 5124 锚点，并优先从 pool 中改选 all_seed 或 risk_lambda>0 的保守候选。
+```
+
+最终校验：
+
+```text
+python -m unittest tests.test_stochastic_optimizer
+Ran 5 tests
+OK
+
+python -m src.check_submission --submission output.csv
+submission_check=rows=5664, days=59, traded_days=59, errors=0, warnings=0
+
+python -m src.guard_submission_candidate --candidate output.csv --reference outputs/output_stochastic_chain2_online5124_20260525.csv --reference-name online5124 --candidate-name output_current --baseline-score 5124.643279527319 --manifest outputs/stochastic_candidate_pool_top1_manifest_online5124_20260525.csv --max-changed-days 1
+decision=PASS
+changed_date=2026-01-27
+changed_actions:
+  2026-01-27: charge=52-59;discharge=69-76 -> charge=49-56;discharge=73-80
+```
+
+提交后必须补记线上结果：
+
+```text
+if score > 5124.643279527319:
+  固化 output.csv 为新的 online-best 锚点
+else:
+  Copy-Item -LiteralPath outputs/output_stochastic_chain2_online5124_20260525.csv -Destination output.csv -Force
+  将 outputs/output_stochastic_pool_top1_online5124_20260525.csv 加入禁止重复提交名单
+```
+
+### 2026-05-25 13:32:15 线上反馈
+
+```text
+submitted=output.csv
+sha256=D556061BAB752A456DF034117E2813D91A64BCDC9ECDCF54A83B03A60D6079F7
+score=5113.038426444253
+previous_best=5124.643279527319
+delta=-11.604853083066
+decision=REJECT_AND_ROLL_BACK
+```
+
+已恢复当前推荐提交为 5124 线上最佳：
+
+```text
+output.csv=outputs/output_stochastic_chain2_online5124_20260525.csv
+sha256=3AA4A21C9D9391AC22C1276720F928BC5196575DEB2FCB09199AFA46B66251A9
+score=5124.643279527319
+```
+
+禁止重复提交：
+
+| 文件 | 状态 | 已知线上分数 | 原因 |
+|---|---:|---:|---|
+| `outputs/output_stochastic_pool_top1_online5124_20260525.csv` | 禁止重复提交 | `5113.038426444253` | `2026-01-27: 52/69 -> 49/73`，双 seed、`risk_lambda=0`、`top1_top2_margin=0.028588`，线上大幅掉分。 |
+
+后续候选池收紧条件：
+
+```text
+blocked_dates=2026-01-11,2026-01-22,2026-01-23,2026-01-27
+prefer_scenario_set=all_seed
+prefer_risk_lambda>0
+avoid_low_top1_top2_margin
+reference=outputs/output_stochastic_chain2_online5124_20260525.csv
+reference_score=5124.643279527319
 ```

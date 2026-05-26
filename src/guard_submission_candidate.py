@@ -14,7 +14,7 @@ from .check_submission import check_submission
 BASELINE_SCORE = 5117.832037755039
 DEFAULT_REFERENCE = "outputs/output_nwp_unconstrained_online5117.csv"
 DEFAULT_MANIFEST = "outputs/single_day_candidate_manifest.csv"
-BLOCKED_SINGLE_DAY_DATES = {"2026-01-11"}
+BLOCKED_SINGLE_DAY_DATES = {"2026-01-05", "2026-01-11", "2026-01-27", "2026-02-02"}
 
 ALLOWED_CANDIDATES = {
     "outputs/output_nwp_unconstrained_online5117.csv": {
@@ -33,6 +33,18 @@ BLOCKED_CANDIDATES = {
     "outputs/output_nwp_unconstrained_t2000.csv": "online score 4903.504068225546; threshold too defensive",
     "outputs/output_residual_nwp.csv": "local validation weaker than main line",
     "outputs/output_window_ranker_c055_d7288.csv": "local validation weaker than main line",
+    "outputs/output_stochastic_pool_top1_online5124_20260525.csv": (
+        "online score 5113.038426444253; overfit single-day pool top1 on 2026-01-27"
+    ),
+    "outputs/output_stochastic_seedagree_online5135_20260526.csv": (
+        "online score 5129.413866405826; seed-agreement single-day move on 2026-01-05 hurt vs 5135 anchor"
+    ),
+    "outputs/output_offline_policy_shape_safe_online5135_20260526.csv": (
+        "online score 5087.6977470609945; offline policy move on 2026-02-02 hurt vs 5135 anchor"
+    ),
+    "outputs/output_offline_policy_online5135_20260526.csv": (
+        "rejected by holdout shape analysis; compressed gap move on 2026-02-05 was high risk"
+    ),
 }
 
 
@@ -178,6 +190,18 @@ def _guard_manifest_policy(
     ]:
         if column not in manifest_row.index or pd.isna(manifest_row[column]):
             errors.append(f"manifest missing required value: {column}")
+    if "submission_price_delta" in manifest_row.index and not pd.isna(manifest_row["submission_price_delta"]):
+        try:
+            submission_price_delta = float(manifest_row["submission_price_delta"])
+            info["submission_price_delta"] = submission_price_delta
+            if submission_price_delta < 0.0:
+                errors.append(f"manifest submission_price_delta is negative: {submission_price_delta}")
+        except (TypeError, ValueError):
+            errors.append(f"manifest submission_price_delta is not a float: {manifest_row['submission_price_delta']}")
+    if "multi_price_delta_agree" in manifest_row.index and not _truthy(
+        manifest_row["multi_price_delta_agree"]
+    ):
+        errors.append("manifest multi_price_delta_agree is false")
     return errors, info
 
 
@@ -237,23 +261,33 @@ def guard_candidate(
     reference_name: str = "safe5117",
     candidate_name: str = "candidate",
     manifest: str = "",
+    baseline_score: float = BASELINE_SCORE,
 ) -> tuple[dict[str, Any], pd.DataFrame]:
     repo_candidate = _as_repo_path(candidate)
     repo_reference = _as_repo_path(reference)
     candidate_sha256 = _sha256(candidate)
+    reference_sha256 = _sha256(reference)
 
     check = check_submission(candidate)
     diff = compare_submissions(reference, candidate, reference_name, candidate_name)
     summary = summarize_diff(diff)
     changed_actions = _changed_actions(diff, reference_name, candidate_name)
-    policy_errors, policy_info = _guard_policy(
-        repo_candidate,
-        summary,
-        max_changed_days,
-        changed_actions,
-        candidate_sha256,
-        manifest=manifest,
-    )
+    if candidate_sha256 == reference_sha256 and int(summary["changed_days"]) == 0:
+        policy_errors = []
+        policy_info = {
+            "manifest_status": "not_required",
+            "stage": "reference_copy",
+            "next_step": "Candidate is byte-identical to the reference submission.",
+        }
+    else:
+        policy_errors, policy_info = _guard_policy(
+            repo_candidate,
+            summary,
+            max_changed_days,
+            changed_actions,
+            candidate_sha256,
+            manifest=manifest,
+        )
 
     errors = list(check.errors) + policy_errors
     warnings = list(check.warnings)
@@ -266,8 +300,8 @@ def guard_candidate(
         "candidate": repo_candidate,
         "reference": repo_reference,
         "candidate_sha256": candidate_sha256,
-        "reference_sha256": _sha256(reference),
-        "baseline_score": BASELINE_SCORE,
+        "reference_sha256": reference_sha256,
+        "baseline_score": float(baseline_score),
         "stage": rule.get("stage", "not_allowed"),
         "next_step": rule.get("next_step", "Do not submit unless policy is updated."),
         **policy_info,
@@ -295,6 +329,7 @@ def _print_report(report: dict[str, Any]) -> None:
         "manifest_status",
         "manifest_date",
         "changed_date",
+        "submission_price_delta",
         "rows",
         "days",
         "traded_days",
@@ -326,6 +361,7 @@ def main() -> None:
     parser.add_argument("--reference", default=DEFAULT_REFERENCE, help="Verified 5117 baseline CSV.")
     parser.add_argument("--candidate-name", default="", help="Name used in diff output columns.")
     parser.add_argument("--reference-name", default="safe5117")
+    parser.add_argument("--baseline-score", type=float, default=BASELINE_SCORE)
     parser.add_argument("--max-changed-days", type=int, default=5)
     parser.add_argument(
         "--manifest",
@@ -344,6 +380,7 @@ def main() -> None:
         reference_name=args.reference_name,
         candidate_name=candidate_name,
         manifest=args.manifest,
+        baseline_score=args.baseline_score,
     )
     _print_report(report)
 
