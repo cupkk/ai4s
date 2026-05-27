@@ -1,16 +1,56 @@
 # 提交候选状态表
 
-更新日期：2026-05-26
+更新日期：2026-05-27
 
 这份文档只回答一个问题：现在应该提交哪个文件，哪些文件只是实验候选，哪些文件不能再当主线。
+
+## 2026-05-27 最后一次提交：回滚到 5135 线上最高锚点
+
+| 文件 | 状态 | 已知线上分数 | 说明 |
+|---|---:|---:|---|
+| `output.csv` | 最后一次应提交文件 | `5135.148567685195` | 已回滚并同步为 `outputs/output_stochastic_conservative_online5135_20260526.csv`，SHA256=`7A11E1D8B0D2D3ADCA8368F17E29AF7F8A7E966D13FCF2A1E2784B06A3B8A14C`。最后一次机会不再试验。 |
+| `outputs/output_stochastic_conservative_online5135_20260526.csv` | 最终保底源文件 | `5135.148567685195` | 当前已知线上最高。直接提交根目录 `output.csv`。 |
+| `outputs/output_portfolio_calendar_exact_target8000_20260527_top16.csv` | 已失败，禁止再提交 | `4599.494317323246` | 2026-05-27 12:52:46 线上失败；已加入 guard 黑名单。 |
+
+最终提交规则：
+```text
+submit=output.csv
+do_not_submit_any_other_candidate=true
+reason=只剩最后一次提交机会，必须保住已知最高 5135 锚点
+```
+
+## 2026-05-27 已失败候选：target8000 top16
+
+| 文件 | 状态 | 估计分 / 已知线上分数 | 说明 |
+|---|---:|---:|---|
+| `outputs/output_portfolio_calendar_exact_target8000_20260527_top16.csv` | 已失败，禁止再提交 | `online=4599.494317323246` | 估计回放为 `8034.424874`，但线上显著低于 5135 锚点，说明 2025 同日形态假设失效。 |
+| `outputs/output_portfolio_calendar_exact_target8000_20260527_top20.csv` | 更激进备选 | `8163.437509` | 估计分更高，但改 20 天且提交价格漂移更负，只在 top16 线上失败且仍要继续高风险冲刺时再考虑。 |
+| `outputs/output_portfolio_calendar_exact_target8000_20260527_top15.csv` | 较稳备选 | `7974.958859` | 只差约 25 分到 8000，可作为降低风险备选，但不满足当前 8000 目标。 |
+| `outputs/output_stochastic_conservative_online5135_20260526.csv` | 回滚锚点 | `5135.148567685195` | 若 target8000 top16 线上分数不高于 5135.148567685195，立即复制该文件回 `output.csv`。 |
+
+提交后处理规则：
+```text
+submit=output.csv
+if online_score > 5135.148567685195:
+  固化当前 output.csv 为新的 online-best 锚点
+else:
+  Copy-Item -LiteralPath outputs\output_stochastic_conservative_online5135_20260526.csv -Destination output.csv -Force
+  不再重复提交 exact_target8000_top16
+```
+
+最新决策表：
+```text
+outputs/portfolio_candidate_decision_table_target8000_20260527.csv
+```
 
 ## 2026-05-26 break-even 可提交候选
 
 | 文件 | 状态 | 已知线上分数 | 说明 |
 |---|---:|---:|---|
-| `output.csv` | 当前待提交候选 | 待提交 | 已同步为 `outputs/output_breakeven_residual_seed_online5135_20260526.csv`，SHA256=`405E748172552BE4DBA5F1AF457B05D4E80F4E7FBAB9B232D2D6E00F35CE6DC4`。相对 5135 锚点只改 `2026-02-19: 42/74 -> 43/74`，`check_submission` 和 `guard` 均通过。 |
-| `outputs/output_breakeven_residual_seed_online5135_20260526.csv` | 可提交候选源文件 | 待提交 | break-even 探针：`submission_price_delta=0.0`、`pred_seed_delta_min=+380.704030`、`residual_delta_p10=+500.432315`、`residual_delta_min=+310.930410`、`residual_positive_rate=1.0`。 |
-| `outputs/breakeven_residual_seed_manifest_online5135_20260526.csv` | guard manifest | 不适用 | 与候选 SHA 匹配，`multi_price_delta_agree=true`，用于证明该候选是单日小位移且非负提交价格口径。 |
+| `output.csv` | 当前待提交候选 | 待提交 | 已同步为 `outputs/output_breakeven_residual_seed_strong_max2_online5135_20260526.csv`，SHA256=`24CED54FCDF5E9AABA9A73160D95FE480260C142A9A2F2E2463365B5D1B1F362`。相对 5135 锚点只改 `2026-02-19: 42/74 -> 44/74`，`check_submission` 和 `guard` 均通过。 |
+| `outputs/output_breakeven_residual_seed_strong_max2_online5135_20260526.csv` | 可提交候选源文件 | 待提交 | stronger break-even 探针：`submission_price_delta=0.0`、`pred_seed_delta_min=+575.249831`、`residual_delta_p10=+751.928362`、`residual_delta_min=+571.078545`、`residual_positive_rate=1.0`。 |
+| `outputs/breakeven_residual_seed_manifest_strong_max2_online5135_20260526.csv` | guard manifest | 不适用 | 与候选 SHA 匹配，`multi_price_delta_agree=true`，用于证明该候选是单日小位移、非负提交价格口径、且 seed/residual 均正向。 |
+| `outputs/output_breakeven_residual_seed_online5135_20260526.csv` | 已被 stronger max2 替换 | 未提交 | 第一版更保守探针：`2026-02-19: 42/74 -> 43/74`，SHA256=`405E748172552BE4DBA5F1AF457B05D4E80F4E7FBAB9B232D2D6E00F35CE6DC4`；保留作回退研究，不作为当前提交。 |
 | `outputs/output_stochastic_conservative_online5135_20260526.csv` | 回滚锚点 | `5135.148567685195` | 若线上分数不高于 5135.148567685195，立刻复制该文件回 `output.csv`。 |
 
 提交后处理规则：
@@ -20,7 +60,7 @@ if online_score > 5135.148567685195:
   固化 output.csv 为新的 online-best 锚点
 else:
   Copy-Item -LiteralPath outputs/output_stochastic_conservative_online5135_20260526.csv -Destination output.csv -Force
-  将 outputs/output_breakeven_residual_seed_online5135_20260526.csv 加入排除/谨慎名单
+  将 outputs/output_breakeven_residual_seed_strong_max2_online5135_20260526.csv 加入排除/谨慎名单
 ```
 
 ## 2026-05-26 V2.0 residual 场景候选状态
@@ -43,7 +83,7 @@ reason=V2 residual top1 及候选池没有任何 submission_price_delta>=0 的�
 
 | 文件 | 状态 | 已知线上分数 | 说明 |
 |---|---:|---:|---|
-| `output.csv` | 当前待提交候选 | 待提交 | 已同步为 break-even residual+seed 候选，SHA256=`405E748172552BE4DBA5F1AF457B05D4E80F4E7FBAB9B232D2D6E00F35CE6DC4`；相对 5135 锚点只改 `2026-02-19: 42/74 -> 43/74`。 |
+| `output.csv` | 当前待提交候选 | 待提交 | 已同步为 stronger break-even residual+seed 候选，SHA256=`24CED54FCDF5E9AABA9A73160D95FE480260C142A9A2F2E2463365B5D1B1F362`；相对 5135 锚点只改 `2026-02-19: 42/74 -> 44/74`。 |
 | `outputs/output_stochastic_conservative_online5135_20260526.csv` | 当前线上最佳锚点 | `5135.148567685195` | 第四轮保守 all-seed 候选线上提升成功，必须保留；后续所有候选都必须相对它做差异审计。 |
 | `outputs/output_offline_policy_shape_safe_online5135_20260526.csv` | 已排除 | `5087.6977470609945` | 保守离线 RL / 策略改进候选，`2026-02-02: 51/71 -> 50/73`，线上相对 5135 大幅回撤，已加入 guard 黑名单。 |
 | `outputs/output_stochastic_seedagree_online5135_20260526.csv` | 已排除 | `5129.413866405826` | 第五轮 seed-agreement 候选，`2026-01-05: 53/67 -> 53/69`，线上低于 5135，已加入 guard 黑名单。 |
@@ -1651,4 +1691,50 @@ prefer_risk_lambda>0
 avoid_low_top1_top2_margin
 reference=outputs/output_stochastic_chain2_online5124_20260525.csv
 reference_score=5124.643279527319
+```
+## 2026-05-27 更新：8000 冲刺 portfolio 候选
+
+用户反馈上一轮 break-even 探针线上分数仍为 `5135.148567685195`，没有超过 5135 锚点。当前目标改为快速冲击 `8000`，因此本轮不再继续单日微调，改为生成多日高方差组合候选。
+
+当前待提交文件：
+
+| 文件 | 状态 | 已知线上分数 | 说明 |
+|---|---:|---:|---|
+| `output.csv` | 当前待提交高风险候选 | 待提交 | 已同步为 `outputs/output_portfolio_calendar_exact_8000push_20260527_top20.csv`，SHA256=`9B976853E0E75A7413AAAC5C9BA74331EF5413388E8C6DD72182E8758DFEEA5A`。 |
+| `outputs/output_portfolio_calendar_exact_8000push_20260527_top20.csv` | 8000 冲刺候选 | 待提交 | 相对 5135 锚点改 20 天；按 2025 同日形态回放估计 `8163.437509`，但 `submission_price_delta_sum=-61532.777224`，属于显式 high-risk jump。 |
+| `outputs/portfolio_candidate_decision_table_20260527.csv` | 决策表 | 不适用 | 汇总 exact/cap8/cap4 候选的 changed_days、2025 同日形态回放估计分、seed/residual 支撑和提交价格风险。 |
+| `outputs/portfolio_candidate_manifest_exact_8000push_20260527.csv` | guard manifest | 不适用 | `manifest_stage=portfolio_high_upside`，用于证明本候选是有意的多日高风险组合，而不是单日保守候选。 |
+| `outputs/output_stochastic_conservative_online5135_20260526.csv` | 回滚锚点 | `5135.148567685195` | 若本轮线上分数不高于 5135，应立即复制回 `output.csv`。 |
+
+候选对比摘要：
+
+| candidate | changed_days | 2025同日形态回放估计分 | seed_delta_min_sum | residual_delta_p10_sum | submission_price_delta_sum | max_shift |
+|---|---:|---:|---:|---:|---:|---:|
+| `portfolio_calendar_exact_8000push_20260527_top20` | 20 | `8163.437509` | `87771.096457` | `13097.197468` | `-61532.777224` | 50 |
+| `portfolio_calendar_exact_8000push_20260527_top15` | 15 | `7974.958859` | `83230.206831` | `21670.902419` | `-44016.890005` | 50 |
+| `portfolio_calendar_exact_8000push_20260527_top10` | 10 | `7680.587232` | `74562.768803` | `30669.262452` | `-38011.526280` | 50 |
+| `portfolio_calendar_cap8_20260527_top15` | 15 | `6628.741063` | `42679.371182` | `12407.778000` | `-36944.037889` | 8 |
+| `portfolio_calendar_cap4_20260527_top8` | 8 | `6089.384409` | `27965.799261` | `23929.022027` | `-10914.129341` | 4 |
+
+验证结果：
+
+```text
+python -m src.check_submission --submission output.csv
+submission_check=rows=5664, days=59, traded_days=59, errors=0, warnings=0
+
+python -m src.guard_submission_candidate --candidate output.csv --reference outputs/output_stochastic_conservative_online5135_20260526.csv --reference-name online5135 --candidate-name output_current --baseline-score 5135.148567685195 --manifest outputs/portfolio_candidate_manifest_exact_8000push_20260527.csv --max-changed-days 20
+decision=PASS
+stage=portfolio_high_upside
+changed_days=20
+```
+
+提交后处理规则：
+
+```text
+submit=output.csv
+if online_score > 5135.148567685195:
+  固化 output.csv 为新的 online-best 锚点
+else:
+  Copy-Item -LiteralPath outputs/output_stochastic_conservative_online5135_20260526.csv -Destination output.csv -Force
+  将 output_portfolio_calendar_exact_8000push_20260527_top20 标记为失败高风险候选
 ```

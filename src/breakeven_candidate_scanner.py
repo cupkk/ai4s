@@ -98,6 +98,7 @@ def build_breakeven_candidate_pool(
     min_residual_p10_delta: float = 0.0,
     min_residual_positive_rate: float = 1.0,
     max_selected_abs_start_delta: Optional[int] = 1,
+    selection_order: str = "safest",
 ) -> pd.DataFrame:
     baseline = baseline_windows_from_submission_frame(reference_submission)
     actions = generate_nearby_actions(
@@ -139,14 +140,25 @@ def build_breakeven_candidate_pool(
         filtered = filtered.loc[
             filtered["max_abs_start_delta"].astype(float) <= float(max_selected_abs_start_delta)
         ].copy()
-    sort_cols = [
-        "max_abs_start_delta",
-        "submission_price_delta",
-        "residual_delta_p10",
-        "pred_seed_delta_min",
-        "total_abs_start_delta",
-    ]
-    ascending = [True, False, False, False, True]
+    if selection_order == "safest":
+        sort_cols = [
+            "max_abs_start_delta",
+            "submission_price_delta",
+            "residual_delta_p10",
+            "pred_seed_delta_min",
+            "total_abs_start_delta",
+        ]
+        ascending = [True, False, False, False, True]
+    elif selection_order == "strongest":
+        sort_cols = [
+            "residual_delta_p10",
+            "pred_seed_delta_min",
+            "max_abs_start_delta",
+            "submission_price_delta",
+        ]
+        ascending = [False, False, True, False]
+    else:
+        raise ValueError(f"unknown selection_order: {selection_order}")
     return filtered.sort_values(sort_cols, ascending=ascending).reset_index(drop=True)
 
 
@@ -239,6 +251,7 @@ def main() -> None:
     parser.add_argument("--min-pred-seed-delta", type=float, default=1.0)
     parser.add_argument("--min-residual-p10-delta", type=float, default=0.0)
     parser.add_argument("--min-residual-positive-rate", type=float, default=1.0)
+    parser.add_argument("--selection-order", choices=["safest", "strongest"], default="safest")
     parser.add_argument("--blocked-dates", default="")
     parser.add_argument("--reason", default="break-even submission-price candidate with positive seed and residual scenarios")
     args = parser.parse_args()
@@ -260,6 +273,7 @@ def main() -> None:
         min_residual_p10_delta=args.min_residual_p10_delta,
         min_residual_positive_rate=args.min_residual_positive_rate,
         max_selected_abs_start_delta=selected_max_delta,
+        selection_order=args.selection_order,
     )
     if pool.empty:
         raise SystemExit("no breakeven candidate passed the configured gates")

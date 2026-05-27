@@ -22,6 +22,11 @@ ALLOWED_CANDIDATES = {
         "stage": "fallback",
         "next_step": "Use as the verified fallback baseline.",
     },
+    "outputs/output_stochastic_conservative_online5135_20260526.csv": {
+        "expected_changed_days": 0,
+        "stage": "online_best_fallback",
+        "next_step": "Use as the final verified online-best fallback unless a newer online score exceeds 5135.148567685195.",
+    },
 }
 
 BLOCKED_CANDIDATES = {
@@ -44,6 +49,12 @@ BLOCKED_CANDIDATES = {
     ),
     "outputs/output_offline_policy_online5135_20260526.csv": (
         "rejected by holdout shape analysis; compressed gap move on 2026-02-05 was high risk"
+    ),
+    "outputs/output_portfolio_calendar_exact_target8000_20260527_top16.csv": (
+        "online score 4599.494317323246; high-risk target8000 calendar portfolio failed vs 5135 anchor"
+    ),
+    "outputs/output_portfolio_calendar_exact_8000push_20260527_top20.csv": (
+        "superseded by target8000 top16 and is even higher drift; do not use for final submission"
     ),
 }
 
@@ -122,6 +133,79 @@ def _load_manifest_row(manifest_path: str, repo_candidate: str, candidate_sha256
     return rows[0]
 
 
+def _guard_portfolio_manifest_policy(
+    manifest_row: pd.Series,
+    summary: dict[str, Any],
+    changed_actions: list[dict[str, Any]],
+    candidate_sha256: str,
+) -> tuple[list[str], dict[str, Any]]:
+    errors: list[str] = []
+    info: dict[str, Any] = {
+        "manifest_status": "matched",
+        "stage": "portfolio_high_upside",
+        "next_step": "Portfolio manifest matched; submit only as an explicitly high-risk jump attempt.",
+    }
+
+    manifest_candidate_sha = str(manifest_row.get("candidate_sha256", "")).upper()
+    if manifest_candidate_sha and manifest_candidate_sha != candidate_sha256:
+        errors.append(
+            f"manifest candidate_sha256 mismatch: manifest={manifest_candidate_sha}, actual={candidate_sha256}"
+        )
+    if _truthy(manifest_row.get("blocked", False)):
+        errors.append("manifest marks candidate as blocked")
+    if not _truthy(manifest_row.get("portfolio_acknowledged_high_risk", False)):
+        errors.append("portfolio manifest must set portfolio_acknowledged_high_risk=true")
+
+    changed_days = int(summary["changed_days"])
+    if "changed_days" in manifest_row.index:
+        try:
+            manifest_changed_days = int(manifest_row["changed_days"])
+            if manifest_changed_days != changed_days:
+                errors.append(
+                    f"manifest changed_days {manifest_changed_days} does not match diff changed_days={changed_days}"
+                )
+        except (TypeError, ValueError):
+            errors.append(f"manifest changed_days is not an integer: {manifest_row['changed_days']}")
+
+    selected_dates = {
+        item.strip()
+        for item in str(manifest_row.get("selected_dates", "")).split(",")
+        if item.strip()
+    }
+    changed_dates = {str(row["date"]) for row in changed_actions}
+    if selected_dates and selected_dates != changed_dates:
+        errors.append(
+            "portfolio selected_dates do not match changed action dates: "
+            f"manifest={sorted(selected_dates)}, changed={sorted(changed_dates)}"
+        )
+    if changed_days != len(changed_actions):
+        errors.append(f"changed_days={changed_days} but changed action rows={len(changed_actions)}")
+    if changed_days == 0:
+        errors.append("portfolio manifest must change at least one day")
+    if any(row["candidate_action"] == "no_trade" for row in changed_actions):
+        errors.append("portfolio manifest includes a no_trade changed action")
+
+    if "submission_price_delta" in manifest_row.index and not pd.isna(manifest_row["submission_price_delta"]):
+        try:
+            info["submission_price_delta"] = float(manifest_row["submission_price_delta"])
+        except (TypeError, ValueError):
+            errors.append(f"manifest submission_price_delta is not a float: {manifest_row['submission_price_delta']}")
+
+    for column in [
+        "candidate_csv",
+        "candidate_sha256",
+        "selected_dates",
+        "pred_window_score",
+        "expected_delta_profit",
+        "score_std",
+        "top1_top2_margin",
+        "reason",
+    ]:
+        if column not in manifest_row.index or pd.isna(manifest_row[column]):
+            errors.append(f"portfolio manifest missing required value: {column}")
+    return errors, info
+
+
 def _guard_manifest_policy(
     manifest_row: pd.Series | None,
     summary: dict[str, Any],
@@ -134,6 +218,14 @@ def _guard_manifest_policy(
         errors.append("candidate is not in static allowlist and no matching manifest row was found")
         info["manifest_status"] = "missing_row"
         return errors, info
+
+    if str(manifest_row.get("manifest_stage", "")).strip() == "portfolio_high_upside":
+        return _guard_portfolio_manifest_policy(
+            manifest_row,
+            summary,
+            changed_actions,
+            candidate_sha256,
+        )
 
     info["manifest_status"] = "matched"
     info["stage"] = "manifest_single_day"

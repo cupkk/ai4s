@@ -46,12 +46,12 @@ class BreakevenCandidateScannerTests(unittest.TestCase):
         price[10:18] = 4.0
         reference = pd.DataFrame({"times": times, "实时价格": price, "power": np.zeros(96)})
         reference.loc[1:8, "power"] = -1000.0
-        reference.loc[10:17, "power"] = 1000.0
+        reference.loc[20:27, "power"] = 1000.0
 
         seed = np.zeros(96, dtype=float)
         seed[1:9] = 3.0
         seed[2:10] = 1.0
-        seed[10:18] = 5.0
+        seed[20:28] = 5.0
         seed_df = pd.DataFrame(
             {
                 "times": times,
@@ -83,6 +83,51 @@ class BreakevenCandidateScannerTests(unittest.TestCase):
         self.assertEqual(int(pool.iloc[0]["candidate_charge_start"]), 2)
         self.assertEqual(float(pool.iloc[0]["submission_price_delta"]), 0.0)
         self.assertTrue(bool(pool.iloc[0]["multi_price_delta_agree"]))
+
+    def test_strongest_order_prefers_larger_positive_residual_within_limit(self):
+        times = pd.date_range("2026-01-01", periods=96, freq="15min")
+        reference = pd.DataFrame({"times": times, "实时价格": np.zeros(96), "power": np.zeros(96)})
+        reference.loc[1:8, "power"] = -1000.0
+        reference.loc[10:17, "power"] = 1000.0
+
+        seed = np.zeros(96, dtype=float)
+        seed[1:9] = 4.0
+        seed[2:10] = 2.0
+        seed[3:11] = 1.0
+        seed[10:18] = 5.0
+        seed_df = pd.DataFrame(
+            {
+                "times": times,
+                "pred_price_seed42": seed,
+                "pred_price_seed2024": seed,
+                "pred_price_seed2026": seed,
+            }
+        )
+        residual_df = pd.DataFrame(
+            {
+                "times": times,
+                "resid_scenario_000": seed,
+                "resid_scenario_001": seed,
+            }
+        )
+
+        pool = build_breakeven_candidate_pool(
+            reference,
+            seed_df,
+            residual_df,
+            max_shift=2,
+            max_selected_abs_start_delta=2,
+            min_pred_seed_delta=1.0,
+            min_residual_p10_delta=1.0,
+            min_residual_positive_rate=1.0,
+            selection_order="strongest",
+        )
+
+        self.assertGreaterEqual(len(pool), 2)
+        self.assertGreaterEqual(
+            float(pool.iloc[0]["residual_delta_p10"]),
+            float(pool.iloc[1]["residual_delta_p10"]),
+        )
 
 
 if __name__ == "__main__":

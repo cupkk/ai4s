@@ -73,6 +73,64 @@ candidate_type=break-even low-risk probe
 expected_behavior=不依赖 submission-price 正收益，只依赖 seed/residual 一致认为微调更好；因此若线上不涨分，应立即回滚 5135 锚点。
 ```
 
+### 2026-05-26 提交前完善：stronger max2 候选
+
+在第一版 `42/74 -> 43/74` 通过 guard 后，继续按用户要求做提交前完善。只在同一安全日期 `2026-02-19` 内比较 charge-only 后移动作，不移动放电窗口，不放开到多日或已失败日期。
+
+新增选择策略：
+```text
+src/breakeven_candidate_scanner.py
+--selection-order safest|strongest
+```
+
+对比结果：
+| candidate | max_abs_start_delta | submission_price_delta | pred_seed_delta_min | residual_delta_p10 | residual_delta_min | residual_positive_rate |
+|---|---:|---:|---:|---:|---:|---:|
+| `42/74 -> 43/74` | 1 | 0.0 | +380.704030 | +500.432315 | +310.930410 | 1.0 |
+| `42/74 -> 44/74` | 2 | 0.0 | +575.249831 | +751.928362 | +571.078545 | 1.0 |
+
+最终采用 stronger max2 候选：
+```text
+candidate=outputs/output_breakeven_residual_seed_strong_max2_online5135_20260526.csv
+sha256=24CED54FCDF5E9AABA9A73160D95FE480260C142A9A2F2E2463365B5D1B1F362
+manifest=outputs/breakeven_residual_seed_manifest_strong_max2_online5135_20260526.csv
+pool=outputs/breakeven_residual_seed_candidate_pool_strong_max2_online5135_20260526.csv
+date=2026-02-19
+baseline=charge=42-49;discharge=74-81
+candidate=charge=44-51;discharge=74-81
+changed_days=1
+max_abs_start_delta=2
+submission_price_delta=0.0
+pred_seed_delta_min=+575.249831
+pred_seed_delta_mean=+791.188844
+residual_delta_p10=+751.928362
+residual_delta_min=+571.078545
+residual_positive_rate=1.0
+```
+
+最终验证：
+```text
+python -m src.check_submission --submission output.csv
+submission_check=rows=5664, days=59, traded_days=59, errors=0, warnings=0
+
+python -m src.guard_submission_candidate --candidate output.csv --reference outputs/output_stochastic_conservative_online5135_20260526.csv --reference-name online5135 --candidate-name output_current --baseline-score 5135.148567685195 --manifest outputs/breakeven_residual_seed_manifest_strong_max2_online5135_20260526.csv --max-changed-days 1
+decision=PASS
+changed_date=2026-02-19
+changed_actions:
+  2026-02-19: charge=42-49;discharge=74-81 -> charge=44-51;discharge=74-81
+
+python -m unittest tests.test_breakeven_candidate_scanner tests.test_residual_scenario_generator tests.test_stochastic_optimizer tests.test_offline_policy_improvement tests.test_guard_submission_candidate
+Ran 26 tests
+OK
+```
+
+当前 `output.csv` 已同步为 stronger max2 候选：
+```text
+output.csv sha256=24CED54FCDF5E9AABA9A73160D95FE480260C142A9A2F2E2463365B5D1B1F362
+rollback_anchor=outputs/output_stochastic_conservative_online5135_20260526.csv
+rollback_anchor_sha256=7A11E1D8B0D2D3ADCA8368F17E29AF7F8A7E966D13FCF2A1E2784B06A3B8A14C
+```
+
 ## 2026-05-26 V2.0 残差整日重采样场景执行结果
 
 本轮按 V2.0 方案 A 执行：不再把 seed/分位数列直接当作互相独立的场景，而是从 2025 验证集抽取完整 96 点日残差向量，再叠加到 2026 测试期的 seed 均值基准预测上。目标是保留误差的日内时间自相关，修复 stochastic optimizer 的场景崩塌问题。
