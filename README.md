@@ -156,3 +156,12 @@ python -m src.tune_robust_strategy `
 2. 只有使用 `-UseLocalBest` 才会用本地验证最高候选覆盖 `output.csv`。
 3. `outputs/` 下大部分实验结果只用于本地复盘。
 4. 每次线上提交结果都要写入 `docs/research/`，并更新候选状态表。
+
+## Open Source Maintenance
+
+This repository is maintained as an open-source AI-for-science energy storage strategy pipeline. See:
+
+- [Open Source Maintenance](docs/OPEN_SOURCE_MAINTENANCE.md)
+- [Contributing Guide](CONTRIBUTING.md)
+- [Security Policy](SECURITY.md)
+- [MIT License](LICENSE)
