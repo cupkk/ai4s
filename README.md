@@ -23,6 +23,8 @@ to_sais_new/to_sais_new/test/test_in_feature_ori.csv
 to_sais_new/to_sais_new/all_nc/*.nc
 ```
 
+这些 CSV 和 `.nc` 文件来自用户本地的竞赛数据，不随仓库再分发。更多路径约定、禁止提交的数据类型和诊断输出示例见 [data/README.md](data/README.md)。
+
 ## 安装依赖
 
 ```powershell
